@@ -6,6 +6,9 @@ like sending messages, setting topics and so on. It is also
 capable of recognising incoming UDP message type and returning 
 information from it.
 
+Project page is hosted at BerliOS. Thanks!
+http://developer.berlios.de/projects/pm-vycchat/
+
 INSTALLATION
 
 To install this module type the following:
