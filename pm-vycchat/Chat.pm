@@ -895,8 +895,6 @@ If you turn off send_info variable (see new()) module won't send
 any information automatically. Then you can access this method to
 generate answer for information request.
 
-=head3 channels
-
 Channels variable can have these values:
 
 =over
