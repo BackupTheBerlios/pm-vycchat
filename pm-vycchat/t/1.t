@@ -6,8 +6,8 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 34;
-#use Test::More 'no_plan';
+#use Test::More tests => 34;
+use Test::More 'no_plan';
 BEGIN { use_ok('Net::Vypress::Chat') };
 
 #########################
@@ -79,11 +79,9 @@ ok($vyc->on_chan("#bullies") == 0, "on_chan ok 0.");
 ok($vyc->on_chan("#Main") == 1, "on_chan ok 1.");
 
 $vyc->join("#test");
-ok(get_type_ok('join'), "got join line.");
 ok($vyc->on_chan("#test") == 1, "join succeded.");
 
 $vyc->part("#test");
-ok(get_type_ok('part'), "got part line.");
 ok($vyc->on_chan("#test") == 0, "part succeded.");
 
 $vyc->msg($vyc->{'nick'}, "");
@@ -103,6 +101,13 @@ $vyc->beep($vyc->{nick});
 
 $vyc->info($vyc->{nick});
 ok(get_type_ok('info'), "got info req.");
+
+ok($vyc->on_priv('foobar') == 0, "not on_priv ok.");
+$vyc->pjoin('foobar');
+ok($vyc->on_priv('foobar') == 1, "pjoin ok.");
+
+$vyc->pchat('foobar', '');
+ok(get_type_ok('pchat'), "got pchat.");
 
 # Shutting down
 $vyc->shutdown;

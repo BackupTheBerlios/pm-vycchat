@@ -72,13 +72,14 @@ sub send_topic { # {{{
 	my $topic = $self->{'channels'}->{$chan}{'topic'};
 	my $str = header()."C".$to."\0".$chan."\0".$topic."\0";
 	$self->{'send'}->send($str);
-	$self->debug("Sent topic $topic for $to on $chan", $str);
+	$self->debug("F: send_topic(), To: $to, Chan: $chan, Topic: \"$topic\""
+		, $str);
 	}
 } # }}}
 
 # Deletes channel from user.
 sub delete_from_channel { # {{{
-	my ($self,$nick,$chan) = @_;
+	my ($self, $nick, $chan) = @_;
 	my $arr_count = @{$self->{users}{$nick}{channels}};
 	my $last;
 	for (0..$arr_count-1) {
@@ -88,6 +89,32 @@ sub delete_from_channel { # {{{
 		}
 		last if $last;
 	}
+} # }}}
+
+# Adds channel record.
+sub add_to_channel { # {{{
+	my ($self, $nick, $chan) = @_;
+	push @{$self->{users}{$nick}{channels}}, $chan;
+} # }}}
+
+# Deletes private record.
+sub delete_from_private { # {{{
+	my ($self, $nick) = @_;
+	my $arr_count = @{$self->{users}{$self->{nick}}{chats}};
+	my $last;
+	for (0..$arr_count-1) {
+		if (@{$self->{users}{$self->{nick}}{chats}}[$_] eq $nick) {
+			delete @{$self->{users}{$self->{nick}}{chats}}[$_];
+			$last = 1;
+		}
+		last if $last;
+	}
+} # }}}
+
+# Adds private record.
+sub add_to_private { # {{{
+	my ($self, $nick) = @_;
+	push @{$self->{users}{$self->{nick}}{chats}}, $nick;
 } # }}}
 
 # Acknowledges a beep
@@ -547,12 +574,12 @@ E.g.: $vyc->join("#Main");
 
 sub join { # Join to channel {{{
 	my ($self, $chan) = @_;
-	if (!$self->on_chan($chan)) {
+	if (!$self->on_chan($self->{nick}, $chan)) {
 		my $str = header()."4".$self->{'nick'}."\0".$chan."\0"
 			.$self->{'users'}{$self->{'nick'}}{'status'}
 			.$self->{'users'}{$self->{'nick'}}{'gender'};
 		$self->{'send'}->send($str);
-		push @{$self->{users}{$self->{nick}}{channels}}, $chan;
+		$self->add_to_channel($self->{nick}, $chan);
 		$self->debug("F: join(), Chan: $chan", $str);
 	}
 	else {
@@ -570,7 +597,7 @@ E.g.: $vyc->part("#Main");
 
 sub part { # {{{
 	my ($self, $chan) = @_;
-	if ($self->on_chan($chan)) {
+	if ($self->on_chan($self->{nick}, $chan)) {
 		my $str = header()."5".$self->{'nick'}."\0".$chan."\0"
 			.$self->{'users'}{$self->{'nick'}}{'gender'};
 		$self->{'send'}->send($str);
@@ -824,11 +851,12 @@ E.g.: $vyc->pjoin("John");
 =cut
 
 sub pjoin { # {{{
-	my ($self,$from,$to) = @_;
+	my ($self, $to) = @_;
 	unless ($self->on_priv($to)) {
 		my $str = header() ."J0". $self->{nick} ."\0". $to ."\0"
 			. $self->{users}{$self->{nick}}{gender};
 		$self->{send}->send($str);
+		$self->add_to_private($to);
 		$self->debug("F: pjoin(), To: $to", $str);
 	}
 	else {
@@ -845,11 +873,12 @@ E.g.: $vyc->ppart("John");
 =cut
 
 sub ppart { # {{{
-	my ($self,$from,$to) = @_;
+	my ($self, $to) = @_;
 	if ($self->on_priv($to)) {
 		my $str = header() ."J1". $self->{nick} ."\0". $to ."\0"
 			. $self->{users}{$self->{nick}}{gender};
 		$self->{send}->send($str);
+		$self->delete_from_private($to);
 		$self->debug("F: ppart(), To: $to", $str);
 	}
 	else {
@@ -968,16 +997,24 @@ Checks if you are on some specific channel.
 
 E.g.: $vyc->on_chan("#Main") would return 1.
 
+=head2 on_chan($nick, $channel)
+
+Checks if someone are on some specific channel.
+
 =cut
 
 sub on_chan { # {{{
-	my ($self, $chan) = @_;
-	if (grep(/\Q$chan\E/, @{$self->{users}{$self->{nick}}{channels}})) {
-		$self->debug("F: on_chan(), Chan: $chan, Status: 1");
+	my ($self, $nick, $chan) = @_;
+	unless (defined $chan) {
+		$chan = $nick;
+		$nick = $self->{nick};
+	}
+	if (grep(/\Q$chan\E/, @{$self->{users}{$nick}{channels}})) {
+		$self->debug("F: on_chan(), Nick: $nick, Chan: $chan, Status: 1");
 		return 1;
 	}
 	else {
-		$self->debug("F: on_chan(), Chan: $chan, Status: 0");
+		$self->debug("F: on_chan(), Nick: $nick, Chan: $chan, Status: 0");
 		return 0;
 	}
 } # }}}
@@ -1114,7 +1151,7 @@ Returns: "chat", $chan, $from, $text
 		my ($chan, $from, $text) = @args;
 		$text = '' unless $text;
 		if ($chan && $from) {
-			if ($self->on_chan($chan)) {
+			if ($self->on_chan($self->{nick}, $chan)) {
 				$self->debug($chan .":<$from> $text", $buffer); 
 				@re = ("chat", $chan, $from, $text);
 			}
@@ -1148,11 +1185,10 @@ Returns: "join", $from, $chan, $status
 =cut
 
 	# Chan join
-	elsif ($pkttype eq '4') {
-		# {{{
+	elsif ($pkttype eq '4') { # {{{
 		my ($who, $chan, $status) = @args;
 		$status = substr $status, 0, 1;
-		if ($self->on_chan($chan)) {
+		if ($self->on_chan($chan) && $who ne $self->{nick}) {
 			$self->debug("F: recognise(), T: join, From: $who, "
 				. "Chan: $chan, Status: "
 				. $self->num2status($status)
@@ -1161,10 +1197,10 @@ Returns: "join", $from, $chan, $status
 			$self->send_topic($who, $chan);
 			$self->{'users'}{$who}{'status'} = $status;
 			$self->{'users'}{$who}{'active'} = 1;
+			$self->add_to_channel($who, $chan);
 			@re = ("join", $who, $chan, $status);
 		}
-		# }}}
-	}
+	} # }}}
 
 =item channel part
 
@@ -1172,15 +1208,14 @@ Returns: "part", $who, $chan
 
 =cut
 
-	# Chan part
-	elsif ($pkttype eq '5') {
-		# {{{
-		my ($who,$chan) = @args;
-		$self->delete_from_channel($who, $chan);
-		$self->debug("$who has left $chan", $buffer); 
-		@re = ("part", $who, $chan);
-		# }}}
-	}
+	elsif ($pkttype eq '5') { # {{{
+		my ($who, $chan) = @args;
+		if ($who ne $self->{nick} && $self->on_chan($who, $chan)) {
+			$self->delete_from_channel($who, $chan);
+			$self->debug("$who has left $chan", $buffer); 
+			@re = ("part", $who, $chan);
+		}
+	} # }}}
 
 =item message
 
@@ -1293,7 +1328,7 @@ Returns: "me", $chan, $fromwho, $text
 		my ($chan, $fromwho, $text) = @args;
 		$text = '' unless $text;
 		if ($chan && $fromwho) {
-			if ($self->on_chan($chan)) {
+			if ($self->on_chan($self->{nick}, $chan)) {
 				$self->debug("$chan * $fromwho $text", $buffer);
 				@re = ("me", $chan, $fromwho, $text);
 			}
@@ -1313,7 +1348,7 @@ Returns: "topic", $chan, $topic
 		my ($chan, $topic) = @args;
 		#$buffer =~ /^\x58.{9}B(#.+?)\0(.*)\0+$/s;
 
-		if ($self->on_chan($chan)) {
+		if ($self->on_chan($self->{nick}, $chan)) {
 			$self->{'channels'}{$chan}{'topic'} = $topic;
 			$self->debug("Topic changed on $chan:\n$topic", $buffer); 
 			@re = ("topic", $chan, $topic);
@@ -1393,13 +1428,12 @@ Returns: "info", $from
 
 =item info request acknowledgment
 
-Returns: "infosend", $from, $host, $user, $ip, $chans, $aa
+Returns: "info_ack", $from, $host, $user, $ip, $chans, $aa
 
 =cut
 
 	# Info req. ack.
-	elsif ($pkttype eq 'G') {
-		# {{{
+	elsif ($pkttype eq 'G') { # {{{
 		my ($forwho, $from, $host, $user, $ip, $chans, $aa) = @args;
 		#$buffer =~ /^\x58.{9}G(.+?)\0(.+?)\0(.+?)\0(.+?)\0(.+?)\0#(.+?)#\0(.+?)\0+$/s;
 		if ($forwho eq $self->{'nick'}) {
@@ -1415,10 +1449,9 @@ User: $user
 Ip:   $ip
 Chans:$chans
 AA:   $aa", $buffer); 
-			@re = ("infosend", $from, $host, $user, $ip, $chans, $aa);
+			@re = ("info_ack", $from, $host, $user, $ip, $chans, $aa);
 		}
-		# }}}
-	}
+	} # }}}
 			
 =item beep
 
@@ -1461,12 +1494,57 @@ Returns: "sound_req", $from, $filename, $channel
 		# {{{
 		my ($from, $file, $chan) = @args;
 		$file = '' unless $file;
-		if ($self->on_chan($chan)) {
+		if ($self->on_chan($self->{nick}, $chan)) {
 			$self->debug("$from requested sound: $file", $buffer);
 			@re = ("sound_req", $from, $file, $chan);
 		}
 		# }}}
 	}
+	
+=item private chat join
+
+Returns: "pjoin", $from
+
+=item private chat leave
+
+Returns: "ppart", $from
+
+=item private chat string
+
+Returns: "pchat", $from, $text
+
+=item private chat /me
+
+Returns: "pme", $from, $text
+
+=cut
+
+	elsif ($pkttype eq 'J') { # {{{
+		my ($temp, $to, $text) = @_;
+    my ($subtype, $from) = split //, $temp, 2;
+		if ($to eq $self->{nick}) {
+			if ($subtype eq '0') {
+				$self->add_to_private($from);
+				$self->debug("F: recognise(), T: pjoin, From: $from", $buffer);
+				@re = ("pjoin", $from);
+			}
+			elsif ($subtype eq '1') {
+				$self->delete_from_private($from);
+				$self->debug("F: recognise(), T: ppart, From: $from", $buffer);
+				@re = ("ppart", $from);
+			}
+			elsif ($subtype eq '2') {
+				$self->debug("F: recognise(), T: pchat, From: $from, Text: \"$text\""
+					, $buffer);
+				@re = ("pchat", $from, $text);
+			}
+			elsif ($subtype eq '3') {
+				$self->debug("F: recognise(), T: pme, From: $from, Text: \"$text\""
+					, $buffer);
+				@re = ("pme", $from, $text);
+			}
+		}
+	} # }}}
 	
 =item here request
 
@@ -1479,7 +1557,7 @@ Returns: "here", $fromwho, $chan
 		# {{{
 		my ($fromwho, $chan) = @args;
 		#$buffer =~ /^\x58.{9}L(.+?)\0(#.+?)\0+$/;
-		if ($self->on_chan($chan)) {
+		if ($self->on_chan($self->{nick}, $chan)) {
 			$self->debug("$fromwho requested here on $chan", $buffer); 
 			$self->here_ack($fromwho, $chan);
 			@re = ("here", $fromwho, $chan);
