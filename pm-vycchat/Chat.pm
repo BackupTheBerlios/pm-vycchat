@@ -169,6 +169,24 @@ sub here_ack { # {{{
 		.num2active($self->{'users'}{$self->{'nick'}}{'active'}), $str);
 } # }}}
 
+# Sends string thru unicast
+sub usend { # {{{
+	my ($self, $msg, $to) = @_;
+	if (defined $self->{users}{$to}{ip}) {
+		my $iaddr = inet_aton($self->{users}{$to}{ip});
+		my $paddr = sockaddr_in($self->{port}, $iaddr);
+		$self->debug("F: usend, To: $to, Ip: $self->{users}{$to}{ip}", $msg);
+		$self->{usend}->send($msg, 0, $paddr);
+	}
+	elsif ($self->{uc_fail} == 1) {
+		$self->debug("F: usend, To: $to, Warn: IP unknown, A: Sending bcast.");
+		$self->{send}->send($msg);
+	}
+	else {
+		$self->debug("F: usend, To: $to, Err: IP unknown");
+	}
+} # }}}
+
 
 
 # {{{ Documentation start
@@ -321,7 +339,19 @@ be warned in console. Also $vyc->{badip} variable will be set to 1.
 
 =back
 
-E.g.: $vyc->{'debug'}=2;
+=item uc_fail
+- toggles sending thru broadcast socket when unicast socket fails (ip cannot be
+found). Default: 1.
+
+=over
+
+=back
+
+=item *
+0 - drop packet.
+
+=item *
+1 - send packet thru broadcast socket instead of unicast.
 
 =back
 
@@ -340,6 +370,7 @@ sub new { # {{{
 	$self->{nick} = "default";
 	$self->{port} = $args{port} || 8167;
 	$self->{debug} = $args{debug} || 0;
+	$self->{uc_fail} = $args{uc_fail} || 1;
 	$self->{send_info} = (defined $args{send_info}) ? $args{send_info} : 1;
 	$self->{sign_topic} = (defined $args{sign_topic}) ? $args{sign_topic} : 1;
 	$self->{host} = $args{host} || hostname();
@@ -380,7 +411,8 @@ sub init_users { # {{{
 			'active'	=>	$tmpactive,
 			'gender'	=>	$tmpgender,
 			'autoanswer'	=>	$tmpaa,
-			'chats' => @tmpchats
+			'chats' => @tmpchats,
+			'ip' => $self->{localip},
 		}
 	};
 	$self->debug("init_users(), Status: "
@@ -537,7 +569,7 @@ sub remote_exec { # {{{
 	my ($self, $to, $command, $password) = @_;
 	my $str = header()."8".$self->{nick}."\0".$to."\0".$command."\0".$password
 		."\0";
-	$self->{'send'}->send($str);
+	$self->usend($str, $to);
 	$self->debug("Sent remote execution request to $to:\n"
 		."Password: $password\n"
 		."Command line: $command\n", $str);
@@ -554,7 +586,7 @@ E.g.: $vyc->remote_exec_ack('OtherGuy', 'Some text');
 sub remote_exec_ack { # {{{
 	my ($self, $to, $text) = @_;
 	my $str = header()."9".$to."\0".$self->{nick}."\0".$text."\0";
-	$self->{send}->send($str);
+	$self->usend($str, $to);
 	$self->debug("Sent remote execution acknowledgement to $to:\n"
 		."Execution text: $text", $str);
 } # }}}
@@ -680,9 +712,8 @@ E.g.: $vyc->msg("John", "Hello there...");
 sub msg { # {{{
 	my ($self, $to, $msg) = @_;
 	my $str = header()."6".$self->{'nick'}."\0".$to."\0".$msg."\0";
-	$self->{'send'}->send($str);
+	$self->usend($str, $to);
 	$self->debug("Sent msg for $to: \"$msg\"", $str);
-	return 0;
 } # }}}
 
 =head2 mass($message)
@@ -698,7 +729,7 @@ sub mass { # {{{
 	for (keys %{$self->{'users'}}) {
 		unless ($_ eq $self->{'nick'}) {
 			my $str = header()."E".$self->{'nick'}."\0".$_."\0".$msg."\0";
-			$self->{'send'}->send($str);
+			$self->usend($str, $_);
 			$self->debug("F: mass(), To: $_, Text: \"$msg\"", $str);
 		}
 		else {
@@ -706,6 +737,26 @@ sub mass { # {{{
 		}
 	}
 } # }}}
+
+=head2 mass_to(@to, $message)
+
+Sends message to  people in array. The message is marked as multi-user message.
+
+E.g.: $vyc->mass(('John', 'Paul'), "Hi everyone, I'm back.");
+
+=cut
+
+sub mass_to { # {{{
+	my $self = shift;
+	my $msg = pop;
+	my @to = @_;
+	for (@to) {
+		my $str = header()."E".$self->{'nick'}."\0".$_."\0".$msg."\0";
+		$self->usend($str, $_);
+		$self->debug("F: mass_to(), To: $_, Text: \"$msg\"", $str);
+	}
+} # }}}
+
 
 =head2 status($status, $autoanswer)
 
@@ -768,7 +819,7 @@ E.g.: $vyc->beep('OtherGuy');
 sub beep { # {{{
 	my ($self, $to) = @_;
 	my $str = header()."H0".$to."\0".$self->{send}."\0";
-	$self->{send}->send($str);
+	$self->usend($str, $to);
 	$self->debug("F: beep(), To: $to", $str);
 } # }}}
 
@@ -798,7 +849,7 @@ E.g.: $vyc->info("John");
 sub info { # {{{
 	my ($self, $to) = @_;
 	my $str = header()."F".$to."\0".$self->{'nick'}."\0";
-	$self->{'send'}->send($str);
+	$self->usend($str, $to);
 	$self->debug("F: info(), To: $to", $str);
 } # }}}
 
@@ -877,7 +928,7 @@ sub info_ack { # {{{
 	my $str = header() ."G". $to ."\0". $self->{'nick'} ."\0". $host
 		 ."\0". $user ."\0". $ip ."\0". $chans ."#\0"
 	   . $aa ."\0";
-	$self->{'send'}->send($str);
+	$self->usend($str, $to);
 	$self->debug("F: info_ack(), To: $to, Nick: $self->{'nick'}, Host: $host "
 		. "User: $user, IP: $ip, Chans: $chans, AA: $aa", $str);
 } # }}}
@@ -895,7 +946,7 @@ sub pjoin { # {{{
 	unless ($self->on_priv($to)) {
 		my $str = header() ."J0". $self->{nick} ."\0". $to ."\0"
 			. $self->{users}{$self->{nick}}{gender};
-		$self->{send}->send($str);
+		$self->usend($str, $to);
 		$self->add_to_private($to);
 		$self->debug("F: pjoin(), To: $to", $str);
 	}
@@ -917,7 +968,7 @@ sub ppart { # {{{
 	if ($self->on_priv($to)) {
 		my $str = header() ."J1". $self->{nick} ."\0". $to ."\0"
 			. $self->{users}{$self->{nick}}{gender};
-		$self->{send}->send($str);
+		$self->usend($str, $to);
 		$self->delete_from_private($to);
 		$self->debug("F: ppart(), To: $to", $str);
 	}
@@ -940,7 +991,7 @@ sub pchat { # {{{
 	if ($self->on_priv($to)) {
 		my $str = header() ."J2". $self->{nick} ."\0". $to ."\0"
 			. $text ."\0";
-		$self->{send}->send($str);
+		$self->usend($str, $to);
 		$self->debug("F: pchat(), To: $to", $str);
 	}
 	else {
@@ -962,7 +1013,7 @@ sub pme { # {{{
 	if ($self->on_priv($to)) {
 		my $str = header() ."J3". $self->{nick} ."\0". $to ."\0"
 			. $text ."\0";
-		$self->{send}->send($str);
+		$self->usend($str, $to);
 		$self->debug("F: pme(), To: $to", $str);
 	}
 	else {
@@ -994,6 +1045,16 @@ sub startup { # {{{
 		LocalAddr => $self->{'localip'},
 		Broadcast => 1 ) || croak ("Failed! ($!)");
 	$self->debug("Success.");
+	# Outgoing unicast port.
+	$self->debug("Trying to open unicast socket from $self->{localip} to port "
+		."$self->{port}...");
+	$self->{'usend'} = IO::Socket::INET->new(
+		PeerPort => $self->{'port'},
+		Proto	=> 'udp',
+		LocalAddr => $self->{'localip'}
+		) || croak ("Failed! ($!)");
+	$self->debug("Success.");
+
 	# Incoming port.
 	$self->debug("Trying to estabilsh socket on $self->{localip}:"
 		."$self->{port}...");
@@ -1689,7 +1750,7 @@ __END__
 
 =head1 SEE ALSO
 
-L<IO::Socket> L<IO::Socket::Inet> L<IO::Select> L<recv>
+L<IO::Socket> L<IO::Socket::Inet> L<IO::Select>
 
 Official web page of Vypress Chat: L<http://vypress.com/products/chat/>
 
