@@ -1,0 +1,115 @@
+#!/usr/bin/perl -w
+use strict;
+use Net::Vypress::Chat;
+use YAML;
+use Data::Dumper;
+use vars qw($buffer $admin);
+use lib qw/./;
+
+my %topiclock;
+my $vyc = Net::Vypress::Chat->new(
+	'localip' => '192.168.0.1',
+	'port' => 8167,
+	'debug' => 2,
+);
+my $password = "999";
+$admin = "arturaz";
+
+$SIG{INT} = \&shut;
+
+$vyc->nick("infobeta");
+$vyc->startup;
+print "Vypress InfoBot initialised.\n";
+while (my @r = $vyc->readsock) {
+	my $type = shift @r;
+	if ($type eq "chat") {
+		my ($user, $str, $chan) = @r;
+		if ($user eq $admin) {
+			if ($str =~ /^\!topic lock (.+)$/) {
+				$topiclock{$chan} = $1;
+				$vyc->topic($chan, $topiclock{$chan});
+				$vyc->chat($chan, "Topic locked.");		
+			}
+			elsif ($str =~ /^\!debug (\d)/) {
+				$vyc->{debug} = $1;
+				$vyc->chat($chan, "Debug $1");
+			}
+			elsif ($str eq "!topic unlock") {
+				delete $topiclock{$chan};
+				$vyc->chat($chan, "Topic unlocked.");
+			}
+			elsif ($str =~ /^\!join #.+$/) {
+				my ($jchan) = $str =~  /^\!join (#.+)$/;
+				if (!$vyc->on_chan($jchan)) {
+					$vyc->chat($chan, "Joining $jchan.");
+					$vyc->join($jchan);
+				}
+				else {
+					$vyc->chat($chan, "Already there!");
+				}
+			}
+			elsif ($str eq "!part") { 
+				if ($chan ne "#Main") { 
+					$vyc->chat($chan, "Parting.");
+					$vyc->part($chan);
+				}
+				else {
+					$vyc->chat($chan, "Parting $chan isn't allowed. "
+						."Use !exit instead."); }
+				}
+			elsif ($str eq "!exit") { 
+				$vyc->chat($chan, "Exitting.");
+				shut();
+				exit;
+			}
+			elsif ($str eq "!logoff") {
+				$vyc->chat($chan, "Administrator logged off.");
+				$admin = '';
+			}
+			elsif ($str eq "!reinit") {
+				$vyc->shutdown();
+				$vyc->startup();
+			}
+			elsif ($str eq "!adminhelp") {
+				$vyc->chat($chan, "\nAdmin help.\n"
+				."!topic lock topic - locks topic on a channel\n"
+				."!topic unlock - unlocks topic on a channel\n"
+				."!join #channel - joins a channel\n"
+				."!part - parts a channel\n"
+				."!exit - exits\n"
+				."!reinit - exits and starts again\n"
+				."!logoff - gives up administrator privilegies");
+			}
+		}
+		if ($str eq "!help") {
+			$vyc->chat($chan, "\nHelp for InfoBot.\n"
+			."To login as administrator send message to me: \"pass password\"\n\n"
+			."Chat commands:\n"
+			."!chans - list all channels i'm in\n"
+			."!topic - see if current topic is locked\n"
+			."!memo - send memo to user next time he joins\n"
+			."\nFor admin commands login and type !adminhelp");
+		}
+		elsif ($str eq "!chans") {
+			my $chans;
+			for (keys %{$vyc->{'channels'}}) { $chans .= "$_ "; }
+			$vyc->chat($chan, "I am on these channels: $chans");
+		}
+	}
+	elsif ($type eq "topic") {
+		my ($chan, $topic) = @r;
+		if (defined($topiclock{$chan}) && ($topic !~ /^\Q$topiclock{$chan}\E/i)) {
+			$vyc->topic($chan, $topiclock{$chan});
+		}
+	}
+	elsif ($type eq "msg") {
+		my ($user, $msg) = @r;
+		if ($user eq $admin) {
+			eval($msg);
+		}
+	}
+}
+sub shut {
+	print "Exiting...\n";
+	$vyc->shutdown();
+}
