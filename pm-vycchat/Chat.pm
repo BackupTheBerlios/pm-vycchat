@@ -398,7 +398,8 @@ sub new { # {{{
 	$self->{coll_avoid} = (defined $args{coll_avoid}) ? $args{coll_avoid} : 1;
 	$self->{send_info} = (defined $args{send_info}) ? $args{send_info} : 1;
 	$self->{sign_topic} = (defined $args{sign_topic}) ? $args{sign_topic} : 1;
-	$self->{host} = $args{host} || hostname();
+	my $host = hostname() || 'localhost';
+	$self->{host} = $args{host} || $host;
 	$self->{'localip'} = $args{'localip'}
 		|| inet_ntoa(scalar gethostbyname($self->{host} || 'localhost'));
 	if (!defined $args{'localip'} && $self->{'localip'} eq "127.0.0.1") {
