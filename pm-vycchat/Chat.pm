@@ -1,3 +1,7 @@
+# vim:syntax=perl
+# vim:tabstop=2
+# vim:shiftwidth=2
+# vim:enc=utf-8
 package Net::Vypress::Chat;
 
 use 5.008;
@@ -601,7 +605,7 @@ sub topic { # {{{
 
 Sends message to person.
 
-E.g.: $vyc->msg("AnotherGuy", "Hello there...");
+E.g.: $vyc->msg("John", "Hello there...");
 
 =cut
 
@@ -719,7 +723,7 @@ sub chanlist { # {{{
 
 Asks user to give his information.
 
-E.g.: $vyc->info("AnotherGuy");
+E.g.: $vyc->info("John");
 
 =cut
 
@@ -734,7 +738,7 @@ sub info { # {{{
 
 Sends user your information.
 
-E.g.: $vyc->info_ack("AnotherGuy");
+E.g.: $vyc->info_ack("John");
 
 By default module sends following information automatically 
 whenever requested by another client (see new()):
@@ -778,7 +782,7 @@ array - array of channels.
 
 =back
 
-E.g.: $vyc->info_ack("AnotherGuy", "made.up.host", "user", "1.2.3.4", 
+E.g.: $vyc->info_ack("John", "made.up.host", "user", "1.2.3.4", 
 ['#Main'], "");
 
 =cut
@@ -810,6 +814,93 @@ sub info_ack { # {{{
 	$self->debug("F: info_ack(), To: $to, Nick: $self->{'nick'}, Host: $host "
 		. "User: $user, IP: $ip, Chan: $chans, AA: $aa", $str);
 } # }}}
+
+=head2 pjoin($user)
+
+Joins to private chat.
+
+E.g.: $vyc->pjoin("John");
+
+=cut
+
+sub pjoin { # {{{
+	my ($self,$from,$to) = @_;
+	unless ($self->on_priv($to)) {
+		my $str = header() ."J0". $self->{nick} ."\0". $to ."\0"
+			. $self->{users}{$self->{nick}}{gender};
+		$self->{send}->send($str);
+		$self->debug("F: pjoin(), To: $to", $str);
+	}
+	else {
+		$self->debug("F: pjoin(), To: $to, Err: Already in.");
+	}
+} # }}}
+
+=head2 ppart($user)
+
+Parts private chat.
+
+E.g.: $vyc->ppart("John");
+
+=cut
+
+sub ppart { # {{{
+	my ($self,$from,$to) = @_;
+	if ($self->on_priv($to)) {
+		my $str = header() ."J1". $self->{nick} ."\0". $to ."\0"
+			. $self->{users}{$self->{nick}}{gender};
+		$self->{send}->send($str);
+		$self->debug("F: ppart(), To: $to", $str);
+	}
+	else {
+		$self->debug("F: ppart(), To: $to, Err: Already out.");
+	}
+} # }}}
+
+=head2 pchat($user, $text)
+
+Sends string to private chat.
+
+E.g.: $vyc->pchat("John", "Some message");
+
+=cut
+
+sub pchat { # {{{
+	my ($self,$from,$to,$text) = @_;
+	$text = '' unless $text;
+	if ($self->on_priv($to)) {
+		my $str = header() ."J2". $self->{nick} ."\0". $to ."\0"
+			. $text ."\0";
+		$self->{send}->send($str);
+		$self->debug("F: pchat(), To: $to", $str);
+	}
+	else {
+		$self->debug("F: pchat(), To: $to, Err: not in chat.");
+	}
+} # }}}
+
+=head2 pme($user, $text)
+
+Sends /me action to private chat.
+
+E.g.: $vyc->pme("John", "Some action");
+
+=cut
+
+sub pme { # {{{
+	my ($self,$from,$to,$text) = @_;
+	$text = '' unless $text;
+	if ($self->on_priv($to)) {
+		my $str = header() ."J3". $self->{nick} ."\0". $to ."\0"
+			. $text ."\0";
+		$self->{send}->send($str);
+		$self->debug("F: pme(), To: $to", $str);
+	}
+	else {
+		$self->debug("F: pme(), To: $to, Err: not in chat.");
+	}
+} # }}}
+
 
 =head2 startup()
 
@@ -887,6 +978,26 @@ sub on_chan { # {{{
 	}
 	else {
 		$self->debug("F: on_chan(), Chan: $chan, Status: 0");
+		return 0;
+	}
+} # }}}
+
+=head2 on_priv($person)
+
+Checks if you are in private chat with someone.
+
+E.g.: $vyc->on_priv("John") would return 1 if you were in chat with John.
+
+=cut
+
+sub on_priv { # {{{
+	my ($self, $to) = @_;
+	if (grep(/\Q$to\E/, @{$self->{users}{$self->{nick}}{chats}})) {
+		$self->debug("F: on_priv(), To: $to, Status: 1");
+		return 1;
+	}
+	else {
+		$self->debug("F: on_priv(), To: $to, Status: 0");
 		return 0;
 	}
 } # }}}
