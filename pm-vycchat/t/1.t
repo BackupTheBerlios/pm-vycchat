@@ -17,9 +17,9 @@ BEGIN { use_ok('Net::Vypress::Chat') };
 
 my $vyc = Net::Vypress::Chat->new(
 	'send_info' => '0',
-	'localip' => '127.0.0.1',
-#	'localip' => '192.168.0.1',
-	'debug' => 0
+#	'localip' => '127.0.0.1',
+	'localip' => '192.168.0.1',
+#	'debug' => 1
 );
 ok(defined $vyc, '$vyc is an object');
 ok($vyc->isa('Net::Vypress::Chat'), "and it's the right class");
@@ -37,8 +37,7 @@ sub get_type_ok { # {{{
 	my $time = time;
 	until ($msgok) {
 		last if (time - $time >= 5) && !$msgok;
-		$vyc->{'listen'}->recv($buffer, 1024);
-		my @return = $vyc->recognise($buffer);
+		my @return = $vyc->readsock();
 		my $type = shift @return;
 		$msgok = 1 if ($type eq $oktype);
 	}
@@ -55,12 +54,13 @@ ok($vyc->num2active(0) eq "Inactive", "num2active inactive ok");
 ok($vyc->num2active(1) eq "Active", "num2active active ok");
 ok($vyc->num2active(2) eq "Unknown", "num2active unknown ok");
 
-$vyc->nick('anothernick');
-ok($vyc->{'nick'} eq 'anothernick', "local nick change.");
 #ok(get_type_ok('nick'), "remote nick change.");
 
 $vyc->who();
 ok(get_type_ok('who'), "got who.");
+
+$vyc->join("#test");
+ok($vyc->on_chan("#test") == 1, "join succeded.");
 
 $vyc->remote_exec($vyc->{'nick'}, '', '');
 ok(get_type_ok('remote_exec'), "got remote execution.");
@@ -80,14 +80,11 @@ ok(get_type_ok('chat'), "got chat line.");
 ok($vyc->on_chan("#bullies") == 0, "on_chan ok 0.");
 ok($vyc->on_chan("#Main") == 1, "on_chan ok 1.");
 
-$vyc->join("#test");
-ok($vyc->on_chan("#test") == 1, "join succeded.");
+$vyc->nick('anothernick');
+ok($vyc->{'nick'} eq 'anothernick', "local nick change.");
 
 $vyc->part("#test");
 ok($vyc->on_chan("#test") == 0, "part succeded.");
-
-$vyc->msg($vyc->{'nick'}, "");
-ok(get_type_ok('msg'), "got msg.");
 
 $vyc->topic("#Main", 'Test topic.');
 ok(get_type_ok('topic'), "got topic line.");
@@ -121,6 +118,7 @@ ok(get_type_ok('info_ack'), "got spoofed info_ack.");
 
 ok($vyc->on_priv($vyc->{nick}) == 0, "on_priv not joined ok.");
 $vyc->pjoin($vyc->{nick});
+$vyc->pjoin($vyc->{nick}."aa");
 ok($vyc->on_priv($vyc->{nick}) == 1, "pjoin ok.");
 
 $vyc->pchat($vyc->{nick}, '');
@@ -131,6 +129,9 @@ $vyc->pme($vyc->{nick}, '');
 
 $vyc->ppart($vyc->{nick});
 ok($vyc->on_priv($vyc->{nick}) == 0, "ppart ok.");
+
+$vyc->msg($vyc->{'nick'}, "");
+ok(get_type_ok('msg'), "got msg.");
 
 # Shutting down
 $vyc->shutdown;

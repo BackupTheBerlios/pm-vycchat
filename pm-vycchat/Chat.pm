@@ -77,24 +77,46 @@ sub send_topic { # {{{
 	}
 } # }}}
 
+# Changes in channels list.
+sub change_in_channels { # {{{
+	my ($self, $from, $to) = @_;
+	while (my ($key, $channel) = each %{$self->{channels}}) {
+		my $arr_cnt = @{$channel->{users}};
+		my $last;
+		for (0..$arr_cnt-1) {
+			if (@{$channel->{users}}[$_] eq $from) {
+				@{$self->{channels}{$key}{users}}[$_] = $to;
+				$last = 1;
+			}
+			last if $last;
+		}
+	}
+} # }}}
+
 # Deletes channel from user.
 sub delete_from_channel { # {{{
 	my ($self, $nick, $chan) = @_;
-	my $arr_count = @{$self->{users}{$nick}{channels}};
-	my $last;
-	for (0..$arr_count-1) {
-		if (@{$self->{users}{$nick}{channels}}[$_] eq $chan) {
-			delete @{$self->{users}{$nick}{channels}}[$_];
-			$last = 1;
-		}
-		last if $last;
+	if ($nick eq $self->{nick}) {
+		delete $self->{channels}{$chan};
 	}
+	else {
+		my $arr_count = @{$self->{channels}{$chan}{users}};
+		my $last;
+		for (0..$arr_count-1) {
+			if (@{$self->{channels}{$chan}{users}}[$_] eq $nick) {
+				splice @{$self->{channels}{$chan}{users}}, $_, 1;
+				$last = 1;
+			}
+			last if $last;
+		}
+	}
+	$self->debug("F: delete_from_channel(), Nick: $nick, Chan: $chan");
 } # }}}
 
 # Adds channel record.
 sub add_to_channel { # {{{
 	my ($self, $nick, $chan) = @_;
-	push @{$self->{users}{$nick}{channels}}, $chan;
+	push @{$self->{channels}{$chan}{users}}, $nick;
 } # }}}
 
 # Deletes private record.
@@ -104,7 +126,7 @@ sub delete_from_private { # {{{
 	my $last;
 	for (0..$arr_count-1) {
 		if (@{$self->{users}{$self->{nick}}{chats}}[$_] eq $nick) {
-			delete @{$self->{users}{$self->{nick}}{chats}}[$_];
+			splice @{$self->{users}{$self->{nick}}{chats}}, $_, 1;
 			$last = 1;
 		}
 		last if $last;
@@ -314,8 +336,6 @@ sub new { # {{{
 	$self->{debug} = $args{debug} || 0;
 	$self->{send_info} = (defined $args{send_info}) ? $args{send_info} : 1;
 	$self->{sign_topic} = (defined $args{sign_topic}) ? $args{sign_topic} : 1;
-	$self->{channels} = {};
-	$self->{chats} = {};
 	$self->{host} = $args{host} || hostname();
 	$self->{'localip'} = $args{'localip'}
 		|| inet_ntoa(scalar gethostbyname($self->{host} || 'localhost'));
@@ -346,7 +366,6 @@ sub init_users { # {{{
 	my $tmpactive = $self->{'users'}{$self->{'nick'}}{'active'} || 0;
 	my $tmpgender = $self->{'users'}{$self->{'nick'}}{'gender'} || 0;
 	my $tmpaa = $self->{'users'}{$self->{'nick'}}{'autoanswer'} || '';
-	my @tmpchannels = $self->{users}{$self->{nick}}{channels} || [];
 	my @tmpchats = $self->{users}{$self->{nick}}{chats} || [];
 	# And then clear userlist and set those values back.
 	$self->{'users'} = {
@@ -355,7 +374,6 @@ sub init_users { # {{{
 			'active'	=>	$tmpactive,
 			'gender'	=>	$tmpgender,
 			'autoanswer'	=>	$tmpaa,
-			'channels' => @tmpchannels,
 			'chats' => @tmpchats
 		}
 	};
@@ -408,6 +426,9 @@ sub nick { # {{{
 		# We assign oldnick data structure here.
 		$self->{'users'}{$self->{'nick'}} = $self->{'users'}{$oldnick};
 		delete $self->{'users'}{$oldnick};
+
+		# Changing in channels
+		$self->change_in_channels($oldnick, $self->{nick});
 		
 		# If we are connected to net announce nick change.
 		if (defined $self->{'send'} && $self->{init}) {
@@ -636,7 +657,7 @@ sub topic { # {{{
 	my $signature = '';
 	$signature = ' ('.$self->{'nick'}.')' if $topic && $self->{sign_topic};
 	my $str = header()."B".$chan."\0".$topic.$signature."\0";
-	$self->{'channels'}->{$chan}{'topic'} = $topic;
+	$self->{'channels'}{$chan}{'topic'} = $topic;
 	$self->{'send'}->send($str);
 	$self->debug("F: topic(), Chan: $chan, Topic: \"$topic\"", $str);
 } # }}}
@@ -836,8 +857,7 @@ sub info_ack { # {{{
 	$aa = $self->{users}{$self->{nick}}{autoanswer} unless $aa;
 
 	if (!defined $chans || $chans eq '1') {
-		$chans = '';
-		$chans .= $_ for @{$self->{users}{$self->{nick}}{channels}};
+		$chans = join '', $self->get_chans($self->{nick});
 	}
 	elsif ($chans eq '0') {
 		$chans = '#Main';
@@ -853,7 +873,7 @@ sub info_ack { # {{{
 	   . $aa ."\0";
 	$self->{'send'}->send($str);
 	$self->debug("F: info_ack(), To: $to, Nick: $self->{'nick'}, Host: $host "
-		. "User: $user, IP: $ip, Chan: $chans, AA: $aa", $str);
+		. "User: $user, IP: $ip, Chans: $chans, AA: $aa", $str);
 } # }}}
 
 =head2 pjoin($user)
@@ -1023,7 +1043,10 @@ sub on_chan { # {{{
 		$chan = $nick;
 		$nick = $self->{nick};
 	}
-	if (grep(/\Q$chan\E/, @{$self->{users}{$nick}{channels}})) {
+	if (
+		defined $self->{channels}{$chan} &&
+		grep(/^\Q$nick\E$/, @{$self->{channels}{$chan}{users}})
+	) {
 		$self->debug("F: on_chan(), Nick: $nick, Chan: $chan, Status: 1");
 		return 1;
 	}
@@ -1043,7 +1066,7 @@ E.g.: $vyc->on_priv("John") would return 1 if you were in chat with John.
 
 sub on_priv { # {{{
 	my ($self, $to) = @_;
-	if (grep(/\Q$to\E/, @{$self->{users}{$self->{nick}}{chats}})) {
+	if (grep(/^\Q$to\E$/, @{$self->{users}{$self->{nick}}{chats}})) {
 		$self->debug("F: on_priv(), To: $to, Status: 1");
 		return 1;
 	}
@@ -1063,7 +1086,7 @@ E.g.: $vyc->on_userlist("Dude") would return 1 if Dude would be logged in.
 
 sub on_userlist { # {{{
 	my ($self, $user) = @_;
-	if (grep(/\Q$user\E/, keys %{$self->{'users'}})) {
+	if (grep(/^\Q$user\E$/, keys %{$self->{'users'}})) {
 		$self->debug("F: on_userlist(), User: $user, Status: 1");
 		return 1
 	}
@@ -1073,22 +1096,49 @@ sub on_userlist { # {{{
 	}
 } # }}}
 
-=head2 recognise($buffer)
+sub get_chans { # {{{
+	my ($self, $nick) = @_;
+	my (@chans, $chans);
+	for (keys %{$self->{channels}}) {
+		if (grep /^\Q$nick\E$/, @{$self->{channels}{$_}{users}}) {
+			push @chans, $_;
+			$chans .= $_;
+		}		
+	}
+	$self->debug("F: get_chans(), Nick: $nick, Chans: $chans");
+	return @chans;	
+} # }}}
 
-Recognises string in a buffer if it is Vypress Chat protocol command.
-Returns type of command and its arguments. Also executes actions when needed.
+=head2 readsock()
+
+Reads socket and recognises string it received.
+Returns array. See recognise().
 
 E.g.: 
 
- while ($vyc->{'listen'}->recv($buffer, 1024)) {
- 	my @return = $vyc->recognise($buffer);
- 	if ($r[0] =~ /message/) {
- 		if ($r[2] =~ /pass $password/) {
- 			$vyc->msg($r[1], "Password accepted.");
- 			$admin = $r[1];
- 		}
+ while (my @args = $vyc->readsock()) {
+ 	# Remove first array element.
+ 	my $packet_type = shift @args;
+	if ($packet_type eq 'msg') {
+		my ($from, $message) = @args;
  	}
  }
+
+=cut
+
+sub readsock { # {{{
+	my $self = shift;
+	my $buffer;
+	my $ip = $self->{'listen'}->recv($buffer, 1024);
+	(undef, $ip) = sockaddr_in($ip);
+	$ip = inet_ntoa($ip);
+	return $self->recognise($buffer, $ip);
+} # }}}
+
+=head2 recognise($buffer, $ip)
+
+Recognises string in a buffer if it is Vypress Chat protocol command.
+Returns type of command and its arguments. Also executes actions when needed.
 
 Values are returned in array. First value will always be type of command.
 Other values may differ. Possible values are:
@@ -1098,7 +1148,7 @@ Other values may differ. Possible values are:
 =cut
 
 sub recognise {
-	my ($self, $buffer) = @_;
+	my ($self, $buffer, $ip) = @_;
 	my @re;
 	if ($buffer !~ /^\x58.{9}/) {
 		return ("badpckt");		
@@ -1116,25 +1166,22 @@ Returns: "who", $updater.
 =cut
 
 	# Who's here?
-	if ($pkttype eq '0') {
-		# {{{
+	if ($pkttype eq '0') { # {{{
 		my $updater = $args[0];
 		$self->debug("F: recognise(), Type: who, From: $updater", $buffer); 
 		$self->i_am_here($updater);
 		@re = ("who", $updater);
-		# }}}
-	}
+	} # }}}
 
 =item I am here
 
-Returns: "whorep", $from, $status, $active
+Returns: "who_ack", $from, $status, $active
 
 =cut
 
 	# I'm here
-	elsif ($pkttype eq '1') {
-		# {{{
-		my ($updater,$responder,$statusactive) = @args;
+	elsif ($pkttype eq '1') { # {{{
+		my ($updater, $responder, $statusactive) = @args;
 		my ($status, $active) = split //, $statusactive;
 		if (($updater eq $self->{'nick'}) && 
 		(
@@ -1142,16 +1189,17 @@ Returns: "whorep", $from, $status, $active
 			(!$self->on_userlist($responder))
 		)
 		) {
-			$self->debug("$responder said that it's here with status "
-				.$self->num2status($status)." and state "
-				.$self->num2active($active)."", $buffer); 
-			$self->{'users'}{$responder}{'status'} = $status;
-			$self->{'users'}{$responder}{'active'} = $active;
-			$self->debug("Added $responder to user list");
-			@re = ("whorep", $responder, $status, $active);
+			$self->debug("F: recognise(), T: who_ack, From: $responder, Status: "
+				. $self->num2status($status) .", Active: "
+				. $self->num2active($active)
+				, $buffer); 
+			$self->{users}{$responder}{status} = $status;
+			$self->{users}{$responder}{active} = $active;
+			$self->{users}{$responder}{ip} = $ip;
+			$self->add_to_channel($updater, '#Main') unless $self->on_chan('#Main');
+			@re = ("who_ack", $responder, $status, $active);
 		}
-		# }}}
-	}
+	} # }}}
 
 =item channel chat
 
@@ -1209,8 +1257,9 @@ Returns: "join", $from, $chan, $status
 				, $buffer); 
 
 			$self->send_topic($who, $chan);
-			$self->{'users'}{$who}{'status'} = $status;
-			$self->{'users'}{$who}{'active'} = 1;
+			$self->{users}{$who}{status} = $status;
+			$self->{users}{$who}{active} = 1;
+			$self->{users}{$who}{ip} = $ip;
 			$self->add_to_channel($who, $chan);
 			@re = ("join", $who, $chan, $status);
 		}
@@ -1626,9 +1675,9 @@ __END__
 
 =head1 SEE ALSO
 
-IO::Socket IO::Socket::Inet IO::Select recv()
+L<IO::Socket> L<IO::Socket::Inet> L<IO::Select> L<recv()>
 
-Official web page of Vypress Chat: http://vypress.com/products/chat/
+Official web page of Vypress Chat: L<http://vypress.com/products/chat/>
 
 =head1 AUTHOR
 
