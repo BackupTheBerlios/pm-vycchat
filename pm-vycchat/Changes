@@ -1,3 +1,15 @@
+2004-06-24 23:43  arturaz
+
+	* Changes (1.4), Chat.pm (1.12), t/1.t (1.6):
+
+	  Chat.pm
+
+		  * Version bump to 0.62.
+
+	  t/1.t
+
+		  * localip assigment to 127.0.0.1
+
 2004-06-24 00:10  arturaz
 
 	* Changes (1.3):
