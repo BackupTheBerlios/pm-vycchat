@@ -16,8 +16,10 @@ BEGIN { use_ok('Net::Vypress::Chat') };
 # its man page ( perldoc Test::More ) for help writing this test script.
 
 my $vyc = Net::Vypress::Chat->new(
+	'send_info' => '0',
 	'localip' => '127.0.0.1',
-	'debug' => 0
+#	'localip' => '192.168.0.1',
+	'debug' => 1
 );
 ok(defined $vyc, '$vyc is an object');
 ok($vyc->isa('Net::Vypress::Chat'), "and it's the right class");
@@ -90,11 +92,19 @@ ok(get_type_ok('msg'), "got msg.");
 $vyc->topic("#Main", 'Test topic.');
 ok(get_type_ok('topic'), "got topic line.");
 
-$vyc->status(0, "");
-ok(get_type_ok('status'), "got status change.");
+$vyc->status(0, "Available");
+ok(get_type_ok('status'), "got avail. status change.");
+$vyc->status(1, "DND");
+ok(get_type_ok('status'), "got DND status change.");
+$vyc->status(2, "Away");
+ok(get_type_ok('status'), "got away status change.");
+$vyc->status(3, "Offline");
+ok(get_type_ok('status'), "got offline status change.");
 
 $vyc->active(1);
 ok(get_type_ok('active'), "got active change.");
+$vyc->active(0);
+ok(get_type_ok('active'), "got inactive change.");
 
 $vyc->beep($vyc->{nick});
 #ok(get_type_ok('beep'), "got beep.");
@@ -102,12 +112,18 @@ $vyc->beep($vyc->{nick});
 $vyc->info($vyc->{nick});
 ok(get_type_ok('info'), "got info req.");
 
-ok($vyc->on_priv('foobar') == 0, "not on_priv ok.");
-$vyc->pjoin('foobar');
-ok($vyc->on_priv('foobar') == 1, "pjoin ok.");
+ok($vyc->on_priv($vyc->{nick}) == 0, "on_priv not joined ok.");
+$vyc->pjoin($vyc->{nick});
+ok($vyc->on_priv($vyc->{nick}) == 1, "pjoin ok.");
 
-$vyc->pchat('foobar', '');
-ok(get_type_ok('pchat'), "got pchat.");
+$vyc->pchat($vyc->{nick}, '');
+#ok(get_type_ok('pchat'), "got pchat.");
+
+$vyc->pme($vyc->{nick}, '');
+#ok(get_type_ok('pme'), "got pme.");
+
+$vyc->ppart($vyc->{nick});
+ok($vyc->on_priv($vyc->{nick}) == 0, "ppart ok.");
 
 # Shutting down
 $vyc->shutdown;

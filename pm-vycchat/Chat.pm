@@ -300,7 +300,7 @@ sub new { # {{{
 	$self->{nick} = "default";
 	$self->{port} = $args{port} || 8167;
 	$self->{debug} = $args{debug} || 0;
-	$self->{send_info} = $args{send_info} || 1;
+	$self->{send_info} = (defined $args{send_info}) ? $args{send_info} : 1;
 	$self->{channels} = {};
 	$self->{chats} = {};
 	$self->{host} = $args{host} || hostname();
@@ -895,7 +895,7 @@ E.g.: $vyc->pchat("John", "Some message");
 =cut
 
 sub pchat { # {{{
-	my ($self,$from,$to,$text) = @_;
+	my ($self, $to, $text) = @_;
 	$text = '' unless $text;
 	if ($self->on_priv($to)) {
 		my $str = header() ."J2". $self->{nick} ."\0". $to ."\0"
@@ -917,7 +917,7 @@ E.g.: $vyc->pme("John", "Some action");
 =cut
 
 sub pme { # {{{
-	my ($self,$from,$to,$text) = @_;
+	my ($self, $to, $text) = @_;
 	$text = '' unless $text;
 	if ($self->on_priv($to)) {
 		my $str = header() ."J3". $self->{nick} ."\0". $to ."\0"
@@ -1443,12 +1443,9 @@ Returns: "info_ack", $from, $host, $user, $ip, $chans, $aa
 			$chans = undef;
 			foreach (@chans) { $chans .= "#$_,"; }
 			chop $chans;
-			$self->debug("$from sent info:
-Host: $host
-User: $user
-Ip:   $ip
-Chans:$chans
-AA:   $aa", $buffer); 
+			$self->debug("F: recognise(), T: info_ack, From: $from, Host: $host, "
+				. "User: $user, Ip: $ip, Chans: $chans, AA: $aa"
+				, $buffer); 
 			@re = ("info_ack", $from, $host, $user, $ip, $chans, $aa);
 		}
 	} # }}}
