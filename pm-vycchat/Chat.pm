@@ -58,7 +58,7 @@ sub i_am_here { # {{{
 	my $str = header()."1".$updater."\0".$self->{'nick'}."\0"
 	  .$self->{'users'}{$self->{'nick'}}{'status'}
 	  .$self->{'users'}{$self->{'nick'}}{'active'};
-	$self->{'send'}->send($str);
+	$self->usend($str, $updater);
 	$self->debug("F: i_am_here, To: $updater, Nick: $self->{'nick'}, "
 		. "Status: "
 		. $self->num2status($self->{'users'}{$self->{'nick'}}{'status'}).", "
@@ -104,6 +104,20 @@ sub change_in_channels { # {{{
 			last if $last;
 		}
 	}
+} # }}}
+
+# Changes in users list
+sub change_in_users { # {{{
+	my ($self, $oldnick, $newnick) = @_;
+	$self->{'users'}{$newnick} = $self->{'users'}{$oldnick};
+	delete $self->{'users'}{$oldnick};
+} # }}}
+
+# Changes in all
+sub change_in_all { # {{{
+	my ($self, $oldnick, $newnick) = @_;
+	$self->change_in_users($oldnick, $newnick);
+	$self->change_in_channels($oldnick, $newnick);
 } # }}}
 
 # Deletes channel from user.
@@ -174,7 +188,7 @@ sub here_ack { # {{{
 		.$self->{'users'}{$self->{'nick'}}{'active'};
 	$self->{'send'}->send($str);
 	$self->debug("Sent here to $to at $chan with state "
-		.num2active($self->{'users'}{$self->{'nick'}}{'active'}), $str);
+		.$self->num2active($self->{'users'}{$self->{'nick'}}{'active'}), $str);
 } # }}}
 
 # Sends string thru unicast
@@ -458,12 +472,8 @@ sub nick { # {{{
 		# In fact Windows clients even segfaults ;-)
 		$self->{'nick'} = (length($nick) > 20) ? substr($nick, 0, 20) : $nick;
 		
-		# We assign oldnick data structure here.
-		$self->{'users'}{$self->{'nick'}} = $self->{'users'}{$oldnick};
-		delete $self->{'users'}{$oldnick};
-
-		# Changing in channels
-		$self->change_in_channels($oldnick, $self->{nick});
+		# Changing structure
+		$self->change_in_all($oldnick, $self->{nick});
 		
 		# If we are connected to net announce nick change.
 		if (defined $self->{'send'} && $self->{init}) {
@@ -1095,7 +1105,6 @@ E.g.: $vyc->shutdown();
 sub shutdown { # {{{
 	my $self = shift;
 	for ($self->get_chans($self->{nick})) {
-		print $_;
 		$self->part($_) 
 	}
 	# Close sockets
@@ -1341,8 +1350,8 @@ Returns: "nick", $oldnick, $newnick
 					}
 				}
 			}
-			$self->{'users'}{$newnick} = $self->{'users'}{$oldnick};
-			delete $self->{'users'}{$oldnick};
+			$self->change_in_all($oldnick, $newnick);
+			
 			$self->debug("F: recognise, T: nick, From: $oldnick, To: $newnick"
 				, $buffer); 
 			@re = ("nick", $oldnick, $newnick);
