@@ -34,13 +34,13 @@ ok($vyc->{'init'} eq '1', "module was initialized.");
 sub get_type_ok { # {{{
 	my $oktype = shift;
 	my ($buffer, $msgok);
-	my $time = time;
+	alarm 5;
 	until ($msgok) {
-		last if (time - $time >= 5) && !$msgok;
 		my @return = $vyc->readsock();
 		my $type = shift @return;
 		$msgok = 1 if ($type eq $oktype);
 	}
+	$msgok = 0 if $msgok == 2;
 	return $msgok;
 } # }}}
 use Data::Dumper;
@@ -58,6 +58,7 @@ ok($vyc->num2active(2) eq "Unknown", "num2active unknown ok");
 
 $vyc->who();
 ok(get_type_ok('who'), "got who.");
+ok(get_type_ok('whoz'), "got who.");
 
 $vyc->join("#test");
 ok($vyc->on_chan("#test") == 1, "join succeded.");
