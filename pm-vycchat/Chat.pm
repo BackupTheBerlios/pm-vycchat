@@ -1689,7 +1689,7 @@ Official web page of Vypress Chat: L<http://vypress.com/products/chat/>
 
 =head1 AUTHOR
 
-Artūras Šlajus, E<lt>x11@h2o.pieva.netE<gt>
+Artūras Šlajus, E<lt>x11@h2o.sky.ltE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
