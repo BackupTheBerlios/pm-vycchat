@@ -19,7 +19,7 @@ my $vyc = Net::Vypress::Chat->new(
 	'send_info' => '0',
 	'localip' => '127.0.0.1',
 #	'localip' => '192.168.0.1',
-	'debug' => 1
+	'debug' => 0
 );
 ok(defined $vyc, '$vyc is an object');
 ok($vyc->isa('Net::Vypress::Chat'), "and it's the right class");
@@ -111,6 +111,13 @@ $vyc->beep($vyc->{nick});
 
 $vyc->info($vyc->{nick});
 ok(get_type_ok('info'), "got info req.");
+
+$vyc->info_ack($vyc->{nick});
+ok(get_type_ok('info_ack'), "got info_ack.");
+
+$vyc->info_ack($vyc->{nick}, "host", "user", "1.3.2.4", ['#Main', '#foobar']
+	, "AA");
+ok(get_type_ok('info_ack'), "got spoofed info_ack.");
 
 ok($vyc->on_priv($vyc->{nick}) == 0, "on_priv not joined ok.");
 $vyc->pjoin($vyc->{nick});
