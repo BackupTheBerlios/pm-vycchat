@@ -194,14 +194,24 @@ sub here_ack { # {{{
 # Sends string thru unicast
 sub usend { # {{{
 	my ($self, $str, $to) = @_;
-	if (defined $self->{users}{$to}{ip}) {
+	 {
+		$self->debug("F: usend_chan, Chan: $chan, Warn: bcast");
+		$self->{send}->send($str);
+	}
+
+	if ($self->{use_unicast} && defined $self->{users}{$to}{ip}) {
 		my $iaddr = inet_aton($self->{users}{$to}{ip});
 		my $paddr = sockaddr_in($self->{port}, $iaddr);
 		$self->debug("F: usend, To: $to, Ip: $self->{users}{$to}{ip}", $str);
 		$self->{usend}->send($str, 0, $paddr);
 	}
-	elsif ($self->{uc_fail} == 1) {
-		$self->debug("F: usend, To: $to, Warn: IP unknown, A: Sending bcast.");
+	elsif (!$self->{use_unicast} || $self->{uc_fail} == 1) {
+		if ($self->{uc_fail} == 1) {
+			$self->debug("F: usend, To: $to, Warn: IP unknown, A: Sending bcast.");
+		}
+		else {
+			$self->debug("F: usend, To: $to, Warn: Sending bcast.");
+		}
 		$self->{send}->send($str);
 	}
 	else {
@@ -212,10 +222,16 @@ sub usend { # {{{
 # Sends string thru usend to people on some chan
 sub usend_chan { # {{{
 	my ($self, $str, $chan) = @_;
-	$self->debug("F: usend_chan, Chan: $chan");
-	for (@{$self->{channels}{$chan}{users}}) {
-		$self->usend($str, $_);
-	}	
+	if ($self->{use_unicast}) {
+		$self->debug("F: usend_chan, Chan: $chan");
+		for (@{$self->{channels}{$chan}{users}}) {
+			$self->usend($str, $_);
+		}
+	}
+	else {
+		$self->debug("F: usend_chan, Chan: $chan, Warn: Sending bcast.");
+		$self->{send}->send($str);
+	}
 } # }}}
 
 
@@ -355,6 +371,9 @@ be warned in console. Also $vyc->{badip} variable will be set to 1.
 - toggles sending thru broadcast socket when unicast socket fails (ip cannot be
 found). Default: 1.
 
+=item use_unicast
+- toggles using unicast. Default: 0 'cause of buggy unicast code for now.
+
 =item coll_avoid
 - toggle nick collision evasion. If someone changes nick to your nickname 
 modules will prepend number. Default: 1.
@@ -377,6 +396,7 @@ sub new { # {{{
 	$self->{oldnick} = "";
 	$self->{port} = $args{port} || 8167;
 	$self->{debug} = $args{debug} || 0;
+	$self->{use_unicast} = $args{use_unicast} || 0;
 	$self->{uc_fail} = (defined $args{uc_fail}) ? $args{uc_fail} : 1;
 	$self->{coll_avoid} = (defined $args{coll_avoid}) ? $args{coll_avoid} : 1;
 	$self->{send_info} = (defined $args{send_info}) ? $args{send_info} : 1;
