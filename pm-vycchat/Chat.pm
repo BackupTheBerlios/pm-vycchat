@@ -34,9 +34,10 @@ sub debug { # {{{
 } # }}}
 
 # Generates random letters
-sub random_letters { # {{{
+sub gen_random { # {{{
 	my ($count) = shift;
-	my @pool = ("a".."z");
+	#my @pool = ("a".."z");
+	my @pool = (0..9);
 	my $str;
 	$str .= $pool[rand int $#pool] for 1..$count;
 	return $str;
@@ -46,7 +47,7 @@ sub random_letters { # {{{
 # Returns \x58 and nine random letters.
 sub header { # {{{
 	# 0x58 - Vypress Chat
-	return "\x58".random_letters(9);
+	return "\x58".gen_random(9);
 } # }}}
 
 # i_am_here($updater)
@@ -202,11 +203,11 @@ sub usend { # {{{
 		$self->{usend}->send($str, 0, $paddr);
 	}
 	elsif (!$self->{use_unicast} || $self->{uc_fail} == 1) {
-		if ($self->{uc_fail} == 1) {
-			$self->debug("F: usend, To: $to, Warn: IP unknown, A: Sending bcast.");
+		if (!$self->{use_unicast}) {
+			$self->debug("F: usend, To: $to, Warn: Sending bcast.");
 		}
 		else {
-			$self->debug("F: usend, To: $to, Warn: Sending bcast.");
+			$self->debug("F: usend, To: $to, Warn: IP unknown, A: Sending bcast.");
 		}
 		$self->{send}->send($str);
 	}
