@@ -2,6 +2,8 @@
 # vim:tabstop=2
 # vim:shiftwidth=2
 # vim:enc=utf-8
+# vim:foldmethod=marker
+# vim:foldenable
 package Net::Vypress::Chat;
 
 use 5.008;
@@ -16,7 +18,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.62';
+our $VERSION = '0.70';
 
 # Prints debug messages
 sub debug { # {{{
@@ -171,20 +173,29 @@ sub here_ack { # {{{
 
 # Sends string thru unicast
 sub usend { # {{{
-	my ($self, $msg, $to) = @_;
+	my ($self, $str, $to) = @_;
 	if (defined $self->{users}{$to}{ip}) {
 		my $iaddr = inet_aton($self->{users}{$to}{ip});
 		my $paddr = sockaddr_in($self->{port}, $iaddr);
-		$self->debug("F: usend, To: $to, Ip: $self->{users}{$to}{ip}", $msg);
-		$self->{usend}->send($msg, 0, $paddr);
+		$self->debug("F: usend, To: $to, Ip: $self->{users}{$to}{ip}", $str);
+		$self->{usend}->send($str, 0, $paddr);
 	}
 	elsif ($self->{uc_fail} == 1) {
 		$self->debug("F: usend, To: $to, Warn: IP unknown, A: Sending bcast.");
-		$self->{send}->send($msg);
+		$self->{send}->send($str);
 	}
 	else {
 		$self->debug("F: usend, To: $to, Err: IP unknown");
 	}
+} # }}}
+
+# Sends string thru usend to people on some chan
+sub usend_chan { # {{{
+	my ($self, $str, $chan) = @_;
+	$self->debug("F: usend_chan, Chan: $chan");
+	for (@{$self->{channels}{$chan}{users}}) {
+		$self->usend($str, $_);
+	}	
 } # }}}
 
 
@@ -602,7 +613,7 @@ E.g.: $vyc->sound_req("#Main", 'clap.wav');
 sub sound_req { # {{{
 	my ($self, $chan, $file) = @_;
 	my $str = header()."I".$self->{nick}."\0".$file."\0".$chan."\0";
-	$self->{send}->send($str);
+	$self->usend_chan($str, $chan);
 	$self->debug("Sent sound request for file $file to $chan", $str);
 } # }}}
 
@@ -617,7 +628,7 @@ E.g.: $vyc->me("#Main", "jumps around.");
 sub me { # {{{
 	my ($self, $chan, $text) = @_;
 	my $str = header()."A".$chan."\0".$self->{nick}."\0".$text."\0";
-	$self->{send}->send($str);
+	$self->usend_chan($str, $chan);
 	$self->debug("Did /me action in $chan: $text", $str);
 } # }}}
 
@@ -632,7 +643,7 @@ E.g.: $vyc->chat("#Main", "Hello!");
 sub chat { # {{{
 	my ($self, $chan, $text) = @_;
 	my $str = header()."2".$chan."\0".$self->{'nick'}."\0".$text."\0";
-	$self->{'send'}->send($str);
+	$self->usend_chan($str, $chan);
 	$self->debug("Sent chat string to $chan: $text", $str);
 } # }}}
 
@@ -650,7 +661,7 @@ sub join { # Join to channel {{{
 		my $str = header()."4".$self->{'nick'}."\0".$chan."\0"
 			.$self->{'users'}{$self->{'nick'}}{'status'}
 			.$self->{'users'}{$self->{'nick'}}{'gender'};
-		$self->{'send'}->send($str);
+		$self->usend_chan($str, $chan);
 		$self->add_to_channel($self->{nick}, $chan);
 		$self->debug("F: join(), Chan: $chan", $str);
 	}
@@ -672,7 +683,7 @@ sub part { # {{{
 	if ($self->on_chan($self->{nick}, $chan)) {
 		my $str = header()."5".$self->{'nick'}."\0".$chan."\0"
 			.$self->{'users'}{$self->{'nick'}}{'gender'};
-		$self->{'send'}->send($str);
+		$self->usend_chan($str, $chan);
 
 		$self->delete_from_channel($self->{nick}, $chan);
 		$self->debug("F: part(), Chan: $chan", $str);
@@ -696,7 +707,7 @@ sub topic { # {{{
 	$signature = ' ('.$self->{'nick'}.')' if $topic && $self->{sign_topic};
 	my $str = header()."B".$chan."\0".$topic.$signature."\0";
 	$self->{'channels'}{$chan}{'topic'} = $topic;
-	$self->{'send'}->send($str);
+	$self->usend_chan($str, $chan);
 	$self->debug("F: topic(), Chan: $chan, Topic: \"$topic\"", $str);
 } # }}}
 
@@ -1747,6 +1758,12 @@ Returns: "active", $fromwho, $active
 __END__
 
 =back
+
+=head1 TRICKS
+
+=head2 Getting userlist for channel.
+
+Userlist for channel is stored in $vyc->{channels}{$chan}{users}. It's an array.
 
 =head1 SEE ALSO
 
