@@ -100,6 +100,16 @@ sub chanlist_ack { # {{{
 	my ($self, $to) = @_;
 } # }}}
 
+# Acknowledges to here() request on channel.
+sub here_ack { # {{{
+	my ($self, $to, $chan) = @_;
+	my $str = header()."K".$to."\0".$chan."\0".$self->{'nick'}."\0"
+		.$self->{'users'}{$self->{'nick'}}{'active'};
+	$self->{'send'}->send($str);
+	$self->debug("Sent here to $to at $chan with state "
+		.num2active($self->{'users'}{$self->{'nick'}}{'active'}), $str);
+} # }}}
+
 
 
 # {{{ Documentation start
@@ -221,6 +231,9 @@ If it cannot do that or you don't have canonical hostname set up it will be set
 to '127.0.0.1'. Note: module cannot function properly in such mode and you will
 be warned in console. Also $vyc->{badip} variable will be set to 1.
 
+=item host
+- your hostname. Defaults to: hostname()
+
 =item debug
 - debug level. Debug messages are printed to STDOUT. Default: 0
 
@@ -259,9 +272,9 @@ sub new { # {{{
 	$self->{send_info} = $args{send_info} || 1;
 	$self->{channels} = {};
 	$self->{chats} = {};
-	my $host = $args{host} || hostname();
+	$self->{host} = $args{host} || hostname();
 	$self->{'localip'} = $args{'localip'}
-		|| inet_ntoa(scalar gethostbyname($host || 'localhost'));
+		|| inet_ntoa(scalar gethostbyname($self->{host} || 'localhost'));
 	if (!defined $args{'localip'} && $self->{'localip'} eq "127.0.0.1") {
 		carp ("Your hostname resolution returned '127.0.0.1'. This probably "
 			."indicates broken dns. Make sure that resolving your hostname "
@@ -717,45 +730,86 @@ sub info { # {{{
 	$self->debug("F: info(), To: $to", $str);
 } # }}}
 
-# Sends your computer information. Information that is sent:
-# host, ip, channels, 
-# host - got by hostname().
-# ip address - value that localip is set to or got from host.
-# channel list - the channel list which is being held in %{$vyc->{'channels'}}.
-# auto answer - got from autoanswer variable.
-sub send_info {
-# {{{ 
-	my ($self, $to) = @_;
-	my $host = hostname();
-	my $ip = $self->{localip}
-	  || inet_ntoa(scalar gethostbyname($host || 'localhost'));
-	my $chans;
-	$chans .= $_ for keys %{$self->{'channels'}};
-	my $str = header()."G".$to."\0".$self->{'nick'}."\0".$host."\0"
-	  .$ENV{'USER'}."\0".$ip."\0".$chans."#\0"
-	  .$self->{'users'}{$self->{'nick'}}{'autoanswer'}."\0";
-	$self->{'send'}->send($str);
-	$self->debug("Replied to $to with info:
-Nick: $self->{'nick'}
-Host: $host
-User: ".$ENV{'USER'}."
-IP: $ip
-Chan: $chans
-AA:   $self->{'users'}{$self->{'nick'}}{'autoanswer'}", $str);
-# }}}
-}
+=head2 info_ack($user)
 
-#Acknowledges to here() request on channel.
-sub here_ack {
-# {{{
-	my ($self, $to, $chan) = @_;
-	my $str = header()."K".$to."\0".$chan."\0".$self->{'nick'}."\0"
-		.$self->{'users'}{$self->{'nick'}}{'active'};
+Sends user your information.
+
+E.g.: $vyc->info_ack("AnotherGuy");
+
+By default module sends following information automatically 
+whenever requested by another client (see new()):
+
+=over
+
+=item host
+- see new();
+
+=item user
+- gets enviroment variable USER;
+
+=item channel list
+- gets it from $self->{users}{$self->{nick}}{channels};
+
+=item auto answer
+- gets it from $self->{users}{$self->{nick}}{autoanswer}
+
+=back
+
+=head2 info_ack($user, $host, $ip, $user, $channels, $autoanswer)
+
+If you turn off send_info variable (see new()) module won't send
+any information automatically. Then you can access this method to
+generate answer for information request.
+
+=head3 channels
+
+Channels variable can have these values:
+
+=over
+
+=item *
+1 - send actual channel list
+
+=item *
+0 - send nothing but #Main
+
+=item *
+array - array of channels.
+
+=back
+
+E.g.: $vyc->info_ack("AnotherGuy", "made.up.host", "user", "1.2.3.4", 
+['#Main'], "");
+
+=cut
+
+sub info_ack { # {{{
+	my ($self, $to, $host, $ip, $user, $chans, $aa) = @_;
+	$host = $self->{host} unless $host;
+	$ip = $self->{localip} unless $ip;
+	$user = $ENV{USER} unless $user;
+	$aa = $self->{users}{$self->{nick}}{autoanswer} unless $aa;
+
+	if (!defined $chans || $chans eq '1') {
+		$chans = '';
+		$chans .= $_ for @{$self->{users}{$self->{nick}}{channels}};
+	}
+	elsif ($chans eq '0') {
+		$chans = '#Main';
+	}
+	else {
+		my $tempchans;
+		$tempchans .= $_ for @{$chans};
+		$chans = $tempchans;
+	}
+	
+	my $str = header() ."G". $to ."\0". $self->{'nick'} ."\0". $host
+		 ."\0". $user ."\0". $ip ."\0". $chans ."#\0"
+	   . $aa ."\0";
 	$self->{'send'}->send($str);
-	$self->debug("Sent here to $to at $chan with state "
-		.num2active($self->{'users'}{$self->{'nick'}}{'active'}), $str);
-# }}}
-}
+	$self->debug("F: info_ack(), To: $to, Nick: $self->{'nick'}, Host: $host "
+		. "User: $user, IP: $ip, Chan: $chans, AA: $aa", $str);
+} # }}}
 
 =head2 startup()
 
@@ -1220,7 +1274,7 @@ Returns: "info", $from
 		#$buffer =~ /^\x58.{9}F(.+?)\0(.+?)\0+$/;
 		if ($forwho =~ $self->{'nick'}) {
 			$self->debug("F: recognise(), T: info, From: $from", $buffer); 
-			$self->send_info($from) if $self->{send_info};
+			$self->info_ack($from) if $self->{send_info};
 			@re = ("info", $from);
 		}
 		# }}}
