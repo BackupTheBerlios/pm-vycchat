@@ -6,7 +6,7 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 42;
+use Test::More tests => 44;
 #use Test::More 'no_plan';
 BEGIN { use_ok('Net::Vypress::Chat') };
 
@@ -17,8 +17,8 @@ BEGIN { use_ok('Net::Vypress::Chat') };
 
 my $vyc = Net::Vypress::Chat->new(
 	'send_info' => '0',
-	'localip' => '127.0.0.1',
-#	'localip' => '192.168.0.1',
+#	'localip' => '127.0.0.1',
+	'localip' => '192.168.0.1',
 #	'debug' => 1
 );
 ok(defined $vyc, '$vyc is an object');
@@ -27,6 +27,7 @@ ok($vyc->isa('Net::Vypress::Chat'), "and it's the right class");
 # Startup stuff
 $vyc->startup;
 ok(defined $vyc->{'send'}, "send socket ok.");
+ok(defined $vyc->{'usend'}, "unicast send socket ok.");
 ok(defined $vyc->{'listen'}, "listen socket ok.");
 ok($vyc->{'init'} eq '1', "module was initialized.");
 
@@ -54,11 +55,8 @@ ok($vyc->num2active(0) eq "Inactive", "num2active inactive ok");
 ok($vyc->num2active(1) eq "Active", "num2active active ok");
 ok($vyc->num2active(2) eq "Unknown", "num2active unknown ok");
 
-#ok(get_type_ok('nick'), "remote nick change.");
-
 $vyc->who();
 ok(get_type_ok('who'), "got who.");
-ok(get_type_ok('whoz'), "got who.");
 
 $vyc->join("#test");
 ok($vyc->on_chan("#test") == 1, "join succeded.");
@@ -140,5 +138,6 @@ ok(get_type_ok('mass'), "got mass_to.");
 # Shutting down
 $vyc->shutdown;
 ok(!defined $vyc->{'send'}, "send socket shut down.");
+ok(!defined $vyc->{'usend'}, "unicast send socket shut down.");
 ok(!defined $vyc->{'listen'}, "listen socket shut down.");
 ok($vyc->{'init'} eq '0', "module was uninitialized.");
