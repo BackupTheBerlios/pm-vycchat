@@ -359,6 +359,7 @@ sub new { # {{{
 	my @vars = qw(send listen init);
 	$self->{$_} = undef for (@vars);
 	$self->{nick} = "default";
+	$self->{oldnick} = "";
 	$self->{port} = $args{port} || 8167;
 	$self->{debug} = $args{debug} || 0;
 	$self->{uc_fail} = (defined $args{uc_fail}) ? $args{uc_fail} : 1;
@@ -447,8 +448,12 @@ E.g.: $vyc->nick("SimpleGuy");
 
 sub nick { # {{{
 	my ($self, $nick) = @_;
-	unless ($self->{'nick'} eq $nick) {
+	if ($self->on_userlist($nick)) {
+		$self->debug("F: nick, Nick: $nick, Err: exists.");
+	}
+	elsif ($self->{'nick'} ne $nick) {
 		my $oldnick = $self->{'nick'};
+		$self->{oldnick} = $oldnick;
 		
 		# Protocol doesn't allow nicks longer than 20 chars.
 		# In fact Windows clients even segfaults ;-)
@@ -650,6 +655,7 @@ sub join { # Join to channel {{{
 #			$self->usend_chan($str, $chan);
 #		}
 		$self->add_to_channel($self->{nick}, $chan);
+		$self->{last_joined_chan} = $chan;
 		$self->debug("F: join(), Chan: $chan", $str);
 	}
 	else {
@@ -1065,11 +1071,6 @@ sub startup { # {{{
 		Proto	=> 'udp') || croak ("Failed! ($!)");
 	$self->debug("Success.");
 
-	$self->{users}{self}{ip} = $self->{localip};
-	$self->usend('IPTEST', 'self');
-	$self->{remoteip} = $self->readsock;
-	delete $self->{users}{self};
-	
 	# We'll use this later to check if we're on the net.
 	$self->{'init'} = 1;
 	# We gotta be on #Main all the time ;-)
@@ -1314,10 +1315,13 @@ Returns: "nick", $oldnick, $newnick
 	# Nick change
 	elsif ($pkttype eq '3') { # {{{
 		my ($oldnick, $newnick) = @args;
-		if ($ip ne ($self->{localip} && $self->{remoteip}) &&
+		if ($ip ne $self->{localip} &&
 				$self->on_userlist($oldnick) &&
 				$oldnick ne $newnick) {
-			if ($newnick eq $self->{nick} && $self->{coll_avoid}) {
+			if ($oldnick eq $self->{oldnick}) {
+				$self->{oldnick} = '';
+			}
+			elsif ($newnick eq $self->{nick} && $self->{coll_avoid}) {
 				for (0..99) {
 					my $nick = $self->{nick};
 					$nick =~ s/^\[\d*\]//;
@@ -1344,8 +1348,11 @@ Returns: "join", $from, $chan, $status
 	elsif ($pkttype eq '4') { # {{{
 		my ($who, $chan, $status) = @args;
 		$status = substr $status, 0, 1;
-		if ($ip ne ($self->{localip} && $self->{remoteip})) {
-			if ($who eq $self->{nick}) {
+		if ($ip ne $self->{localip}) {
+			if ($self->{last_joined_chan} eq $chan) {
+				$self->{last_joined_chan} = '';
+			}
+			elsif ($who eq $self->{nick}) {
 				for (0..99) {
 					my $nick = $self->{nick};
 					$nick =~ s/^\[\d*\]//;
@@ -1435,11 +1442,9 @@ Returns: "msgack", $from, $aa, $status, $gender
 	# Msg acck
 	elsif ($pkttype eq '7') {
 		# {{{
-		my ($to,$from,$aa) = @args;
-#		my ($status, $to) = split //, $temp, 2;
+		my ($to, $from, $aa) = @args;
 		my $status = substr $to, 0, 1, '';
 		my $gender = substr $aa, 0, 1, '';
-#		my ($gender, $aa) = split //, $temp1, 2;
 		#$buffer =~ /^\x58.{9}7([0123])(.+?)\0(.+?)\0([01])(.*)\0+$/s;
 		if ($to =~ $self->{'nick'}) {
 			$self->{'users'}{$from}{'status'} = $status;
