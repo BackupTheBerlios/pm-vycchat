@@ -17,8 +17,8 @@ BEGIN { use_ok('Net::Vypress::Chat') };
 
 my $vyc = Net::Vypress::Chat->new(
 	'send_info' => '0',
-#	'localip' => '127.0.0.1',
-	'localip' => '192.168.0.1',
+	'localip' => '127.0.0.1',
+#	'localip' => '192.168.0.1',
 #	'debug' => 1
 );
 ok(defined $vyc, '$vyc is an object');

@@ -16,7 +16,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.61';
+our $VERSION = '0.62';
 
 # Prints debug messages
 sub debug { # {{{
