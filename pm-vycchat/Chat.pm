@@ -218,6 +218,18 @@ Initialises new instance of module. Sets these variables:
 
 =back
 
+=item sign_topic - automaticaly sign topic. Default: 1
+
+=over
+
+=item *
+0 - not active;
+
+=item *
+1 - active;
+
+=back
+
 =item gender - current gender.
 Is not used, but it is in protocol. Also it seems that Vypress Chat 1.9 has
 preference for that.
@@ -301,6 +313,7 @@ sub new { # {{{
 	$self->{port} = $args{port} || 8167;
 	$self->{debug} = $args{debug} || 0;
 	$self->{send_info} = (defined $args{send_info}) ? $args{send_info} : 1;
+	$self->{sign_topic} = (defined $args{sign_topic}) ? $args{sign_topic} : 1;
 	$self->{channels} = {};
 	$self->{chats} = {};
 	$self->{host} = $args{host} || hostname();
@@ -620,11 +633,12 @@ E.g.: $vyc->topic("#Main", "Hi folks") would give this topic - "Hi folks (Simple
 
 sub topic { # {{{
 	my ($self, $chan, $topic) = @_;
-	my $signature = ($topic) ? ' ('.$self->{'nick'}.')' : '';
+	my $signature = '';
+	$signature = ' ('.$self->{'nick'}.')' if $topic && $self->{sign_topic};
 	my $str = header()."B".$chan."\0".$topic.$signature."\0";
 	$self->{'channels'}->{$chan}{'topic'} = $topic;
 	$self->{'send'}->send($str);
-	$self->debug("Changed topic on $chan:\n$topic", $str);
+	$self->debug("F: topic(), Chan: $chan, Topic: \"$topic\"", $str);
 } # }}}
 
 
