@@ -18,7 +18,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.72';
+our $VERSION = '0.80';
 
 # Prints debug messages
 sub debug { # {{{
@@ -33,11 +33,10 @@ sub debug { # {{{
 	}
 } # }}}
 
-# Generates random letters
+# Generates random stuff
 sub gen_random { # {{{
 	my ($count) = shift;
-	#my @pool = ("a".."z");
-	my @pool = (0..9);
+	my @pool = ("a".."z", "A".."Z", 0..9);
 	my $str;
 	$str .= $pool[rand int $#pool] for 1..$count;
 	return $str;
@@ -56,24 +55,29 @@ sub header { # {{{
 # E.g.: $vyc->i_am_here("OtherGuy");
 sub i_am_here { # {{{
 	my ($self, $updater) = @_;
-	my $str = header()."1".$updater."\0".$self->{'nick'}."\0"
-	  .$self->{'users'}{$self->{'nick'}}{'status'}
-	  .$self->{'users'}{$self->{'nick'}}{'active'};
+	my $str = header() . "1" . $updater . "\0" . $self->{'nick'} . "\0"
+	  . $self->{'users'}{$self->{'nick'}}{'status'}
+	  . $self->{'users'}{$self->{'nick'}}{'active'} . "\0"
+		. $self->{packet_version} . "\0" 
+		. $self->{'users'}{$self->{'nick'}}{gender}
+		. $self->{uuid} . "\0" . '1' . $self->{unicode} . $self->{color};
 	$self->usend($str, $updater);
 	$self->debug("F: i_am_here, To: $updater, Nick: $self->{'nick'}, "
 		. "Status: "
-		. $self->num2status($self->{'users'}{$self->{'nick'}}{'status'}).", "
+		. $self->{'users'}{$self->{'nick'}}{'status'} . ", "
 		. "Active: "
-		. $self->num2active($self->{'users'}{$self->{'nick'}}{'active'})
+		. $self->{'users'}{$self->{'nick'}}{'active'}
 		, $str);
 } # }}}
 
 # Acknowledges that you have got message.
 sub msg_ack { # {{{
-	my ($self, $to) = @_;
-	my $str = header()."7".$self->{'users'}{$self->{'nick'}}{'status'}.$to."\0"
-		.$self->{'nick'}."\0".$self->{'users'}{$self->{'nick'}}{'gender'}
-		.$self->{'users'}{$self->{'nick'}}{'autoanswer'}."\0";
+	my ($self, $to, $pkt_sign) = @_;
+	my $str = header() . "7" 
+		. $self->{'users'}{$self->{'nick'}}{'status'} . $to . "\0"
+		. $self->{'nick'} . "\0" . $self->{'users'}{$self->{'nick'}}{'gender'}
+		. $self->{'users'}{$self->{'nick'}}{'autoanswer'} . "\0"
+		. $pkt_sign . "\0";
 	$self->usend($str, $to);
 	$self->debug("F: msg_ack, To: $to", $str);
 } # }}}
@@ -128,15 +132,8 @@ sub delete_from_channel { # {{{
 		delete $self->{channels}{$chan};
 	}
 	else {
-		my $arr_count = @{$self->{channels}{$chan}{users}};
-		my $last;
-		for (0..$arr_count-1) {
-			if (@{$self->{channels}{$chan}{users}}[$_] eq $nick) {
-				splice @{$self->{channels}{$chan}{users}}, $_, 1;
-				$last = 1;
-			}
-			last if $last;
-		}
+		my @temp = grep !/^\Q$nick\E$/, @{$self->{channels}{$chan}{users}};
+		$self->{channels}{$chan}{users} = \@temp;
 	}
 	$self->debug("F: delete_from_channel, Nick: $nick, Chan: $chan");
 } # }}}
@@ -151,15 +148,8 @@ sub add_to_channel { # {{{
 # Deletes private record.
 sub delete_from_private { # {{{
 	my ($self, $nick) = @_;
-	my $arr_count = @{$self->{users}{$self->{nick}}{chats}};
-	my $last;
-	for (0..$arr_count-1) {
-		if (@{$self->{users}{$self->{nick}}{chats}}[$_] eq $nick) {
-			splice @{$self->{users}{$self->{nick}}{chats}}, $_, 1;
-			$last = 1;
-		}
-		last if $last;
-	}
+	my @temp = grep !/^\Q$nick\E$/, @{$self->{users}{$self->{nick}}{chats}};
+	$self->{users}{$self->{nick}}{chats} = \@temp;
 } # }}}
 
 # Adds private record.
@@ -196,24 +186,8 @@ sub here_ack { # {{{
 sub usend { # {{{
 	my ($self, $str, $to) = @_;
 
-	if ($self->{use_unicast} && defined $self->{users}{$to}{ip}) {
-		my $iaddr = inet_aton($self->{users}{$to}{ip});
-		my $paddr = sockaddr_in($self->{port}, $iaddr);
-		$self->debug("F: usend, To: $to, Ip: $self->{users}{$to}{ip}", $str);
-		$self->{usend}->send($str, 0, $paddr);
-	}
-	elsif (!$self->{use_unicast} || $self->{uc_fail} == 1) {
-		if (!$self->{use_unicast}) {
-			$self->debug("F: usend, To: $to, Warn: Sending bcast.");
-		}
-		else {
-			$self->debug("F: usend, To: $to, Warn: IP unknown, A: Sending bcast.");
-		}
-		$self->{send}->send($str);
-	}
-	else {
-		$self->debug("F: usend, To: $to, Err: IP unknown");
-	}
+	$self->debug("F: usend, To: $to, Warn: Sending bcast.");
+	$self->{send}->send($str);
 } # }}}
 
 # Sends string thru usend to people on some chan
@@ -231,7 +205,21 @@ sub usend_chan { # {{{
 	}
 } # }}}
 
+# Generates packet version
+sub packet_version { # {{{
+	my ($major, $minor) = @_;
+	($minor, $major) = (sprintf('%X', $minor), sprintf('%X', $major));
+	$major = '0' . $major if length($major) == 1;
+	$minor = '0' . $minor if length($minor) == 1;
+	return $major . $minor;
+} # }}}
 
+# Replies to ping
+sub pong { # {{{
+	my ($self, $to, $time) = @_;
+	my $str = header() . 'P1' . $to . "\0" . $self->{nick} . "\0" . $time . "\0";
+	$self->usend($str, $to);
+} # }}}
 
 # {{{ Documentation start
 
@@ -343,7 +331,7 @@ Default: 0
 current canonical hostname (like my.host.net) and converts it into ip address.
 If it cannot do that or you don't have canonical hostname set up it will be set
 to '127.0.0.1'. Note: module cannot function properly in such mode and you will
-be warned in console. Also $vyc->{badip} variable will be set to 1.
+be warned in console. Also $vyc->{bad_ip} variable will be set to 1.
 
 =item host
 - your hostname. Defaults to: hostname()
@@ -364,16 +352,18 @@ be warned in console. Also $vyc->{badip} variable will be set to 1.
 
 =back
 
-=item uc_fail
-- toggles sending thru broadcast socket when unicast socket fails (ip cannot be
-found). Default: 1.
-
-=item use_unicast
-- toggles using unicast. Default: 0 'cause of buggy unicast code for now.
+=item unicode
+- turn this of if your text ain't UTF-8. Default: 1.
 
 =item coll_avoid
 - toggle nick collision evasion. If someone changes nick to your nickname 
 modules will prepend number. Default: 1.
+
+=item color
+- an RGB encoded color value that chat may use to display your
+strings at common chat. This is optional feature in Vypress Chat that allows
+using custom color and if a user has this feature switched on then Chat will
+use this value to display your text. Default is RGB(0,0,0) (black).
 
 =back
 
@@ -393,13 +383,28 @@ sub new { # {{{
 	$self->{oldnick} = "";
 	$self->{port} = $args{port} || 8167;
 	$self->{debug} = $args{debug} || 0;
-	$self->{use_unicast} = $args{use_unicast} || 0;
-	$self->{uc_fail} = (defined $args{uc_fail}) ? $args{uc_fail} : 1;
+	unless ($args{uuid}) {
+		use Data::UUID;
+		my $ug = Data::UUID->new;
+		$self->{uuid} = $ug->create();
+	}
+	else {
+		$self->{uuid} = $args{uuid};
+	}
+	chomp($self->{os} = $args{os} || `uname -a`);
+	$self->{chat_software} = $args{chat_software} || 'Net::Vypress::Chat v' 
+		. $VERSION; 
+	$self->{unicode} = (defined $args{unicode}) ? $args{unicode} : 1;
+	$self->{color} = $args{color} || 'RGB(0,0,0)';
 	$self->{coll_avoid} = (defined $args{coll_avoid}) ? $args{coll_avoid} : 1;
 	$self->{send_info} = (defined $args{send_info}) ? $args{send_info} : 1;
 	$self->{sign_topic} = (defined $args{sign_topic}) ? $args{sign_topic} : 1;
-	my $host = hostname() || 'localhost';
-	$self->{host} = $args{host} || $host;
+	$self->{host} = $args{host} || hostname();
+	
+	my $major = $args{pack_major} || 1;
+	my $minor = $args{pack_minor} || 91;	
+	$self->{packet_version} = packet_version($major, $minor);
+	
 	$self->{'localip'} = $args{'localip'}
 		|| inet_ntoa(scalar gethostbyname($self->{host} || 'localhost'));
 	if (!defined $args{'localip'} && $self->{'localip'} eq "127.0.0.1") {
@@ -407,7 +412,7 @@ sub new { # {{{
 			."indicates broken dns. Make sure that resolving your hostname "
 			."returns your actual IP address. On most systems this can be done "
 			."by editing /etc/resolv.conf file.\n");
-		$self->{badip} = 1;
+		$self->{bad_ip} = 1;
 	}
 	return bless $self;
 } # }}}
@@ -469,6 +474,19 @@ sub change_net { # {{{
 	return 1;
 } # }}}
 
+=head2 set_packet_version($major, $minor)
+
+Set software packet version. Minor and major are numbers.
+
+E.g.: $vyc->set_packet_version(1, 91);
+
+=cut 
+
+sub set_packet_version { # {{{
+	my ($self, $major, $minor) = @_;
+	$self->{packet_version} = packet_version($major, $minor);
+} # }}}
+
 =head2 nick($nick)
 
 Changes your nickname that is being held in $object->{'nick'}. Truncates
@@ -527,7 +545,7 @@ sub num2status { # {{{
 	}
 	elsif ($status == 1) {
 		$self->debug("F: num2status, Status: DND");
-		return "DND";
+		return "Do Not Disturb";
 	}
 	elsif ($status == 2) {
 		$self->debug("F: num2status, Status: Away");
@@ -579,9 +597,9 @@ sub who { # {{{
 	my ($self) = @_;
 	# See init_users()
 	$self->init_users;
-	my $str = header()."0".$self->{'nick'}."\0";
+	my $str = header() . '0' . $self->{nick} . "\0" . $self->{unicode} . "\0";
 	$self->{'send'}->send($str);
-	$self->debug("Asked who is here with nick $self->{'nick'}", $str);
+	$self->debug("F: who, Nick: $self->{nick}", $str);
 } # }}}
 
 =head2 remote_exec($to, $command, $password)
@@ -674,15 +692,12 @@ E.g.: $vyc->join("#Main");
 sub join { # Join to channel {{{
 	my ($self, $chan) = @_;
 	if (!$self->on_chan($self->{nick}, $chan)) {
-		my $str = header()."4".$self->{'nick'}."\0".$chan."\0"
-			.$self->{'users'}{$self->{'nick'}}{'status'}
-			.$self->{'users'}{$self->{'nick'}}{'gender'};
-#		if ($chan eq '#Main') {
-			$self->{send}->send($str);
-#		}
-#		else {
-#			$self->usend_chan($str, $chan);
-#		}
+		my $str = header() . '4' . $self->{'nick'} . "\0" . $chan . "\0"
+			. $self->{'users'}{$self->{'nick'}}{'status'}
+			. $self->{'users'}{$self->{'nick'}}{'gender'} . "\0"
+			. $self->{packet_version} . $self->{uuid} . $self->{unicode}
+			. $self->{color} . "\0";
+		$self->{send}->send($str);
 		$self->add_to_channel($self->{nick}, $chan);
 		$self->{last_joined_chan} = $chan;
 		$self->debug("F: join, Chan: $chan", $str);
@@ -891,7 +906,7 @@ sub info { # {{{
 	$self->debug("F: info, To: $to", $str);
 } # }}}
 
-=head2 info_ack($user)
+=head2 info_ack($to)
 
 Sends user your information.
 
@@ -916,7 +931,7 @@ whenever requested by another client (see new()):
 
 =back
 
-=head2 info_ack($user, $host, $ip, $user, $channels, $autoanswer)
+=head2 info_ack($to, $host, $ip, $user, $autoanswer, $channels)
 
 If you turn off send_info variable (see new()) module won't send
 any information automatically. Then you can access this method to
@@ -938,18 +953,19 @@ array - array of channels.
 =back
 
 E.g.: $vyc->info_ack("John", "made.up.host", "user", "1.2.3.4", 
-['#Main'], "");
+"autoanswer", ('#Main'));
 
 =cut
 
 sub info_ack { # {{{
-	my ($self, $to, $host, $ip, $user, $chans, $aa) = @_;
+	my ($self, $to, $host, $ip, $user, $aa, $chans) = @_;
 	$host = $self->{host} unless $host;
-	$ip = $self->{localip} unless $ip;
+	$ip = $self->{localip};
 	$user = $ENV{USER} unless $user;
 	$aa = $self->{users}{$self->{nick}}{autoanswer} unless $aa;
+	$chans = 1 unless $chans;
 
-	if (!defined $chans || $chans eq '1') {
+	if ($chans eq '1') {
 		$chans = CORE::join '', $self->get_chans($self->{nick});
 	}
 	elsif ($chans eq '0') {
@@ -961,9 +977,9 @@ sub info_ack { # {{{
 		$chans = $tempchans;
 	}
 	
-	my $str = header() ."G". $to ."\0". $self->{'nick'} ."\0". $host
-		 ."\0". $user ."\0". $ip ."\0". $chans ."#\0"
-	   . $aa ."\0";
+	my $str = header() . "G" . $to . "\0" . $self->{'nick'} . "\0" . $host
+		 . "\0" . $user . "\0" . $ip . "\0" . $chans . "#\0"
+	   . $aa . "\0" . $self->{os} . "\0" . $self->{chat_software} . "\0";
 	$self->usend($str, $to);
 	$self->debug("F: info_ack, To: $to, Nick: $self->{'nick'}, Host: $host "
 		. "User: $user, IP: $ip, Chans: $chans, AA: $aa", $str);
@@ -1229,6 +1245,21 @@ sub get_chans { # {{{
 	return @chans;	
 } # }}}
 
+=head2 flood_notify($to, $seconds)
+
+Notifies user that he's been blocked for flooding for $seconds.
+
+E.g.: $vyc->floog_notify('John', 30);
+
+=cut
+
+sub flood_notify { # {{{
+	my ($self, $to, $sec) = @_;
+	my $str = header() . 'Z' . $to . "\0" . $self->{nick} . "\0" . $sec . "\0";
+	$self->usend($str, $to);
+	$self->debug("f: flood_notify, to: $to, time: $sec", $str);
+} # }}}
+
 =head2 readsock()
 
 Reads socket and recognises string it received.
@@ -1267,14 +1298,12 @@ Other values may differ. Possible values are:
 
 sub recognise {
 	my ($self, $buffer, $ip) = @_;
-	my @re;
-	if ($buffer eq 'IPTEST') {
-		return $ip;
-	}
-	elsif ($buffer !~ /^\x58.{9}/) {
+	my (@re, $pkt_sign);
+	if ($buffer !~ /^\x58(.{9})/) {
 		return ("badpckt");		
 	}
 	else {
+		$pkt_sign = $1;
 		@re = ("unknown");
 	}
 	my @args = split /\0/, substr $buffer, 11;
@@ -1441,7 +1470,7 @@ Returns: "msg", $from, $text
 			if ($to eq $self->{'nick'}) {
 				$self->debug("F: recognise, T: msg, From: $from, Msg: \"$text\""
 					, $buffer); 
-				$self->msg_ack($from);
+				$self->msg_ack($from, $pkt_sign);
 				@re = ("msg",$from,$text);
 			}
 		}
@@ -1461,7 +1490,7 @@ Returns: "mass", $from, $text
 			#$buffer =~ /^\x58.{9}E(.+?)\0(.+?)\0(.+?)\0+$/s;
 			if ($to eq $self->{'nick'}) {
 				$self->debug("Got mass msg from $from:\n$text", $buffer); 
-				$self->msg_ack($from);
+				$self->msg_ack($from, $pkt_sign);
 				@re = ("mass", $from, $text);
 			}
 		}
@@ -1581,9 +1610,8 @@ Returns: "topic", $chan, $topic
 		) {
 			$self->{'channels'}{$chan}{'topic'} = $topic;
 			$self->debug("Topic for $chan ["
-				.gethostbyaddr($self->{'listen'}->peeraddr, AF_INET)." "
-				.$self->{'listen'}->peerhost."]:\n"
-				.$self->{'channels'}{$chan}{'topic'}, $buffer); 
+				. $self->{'listen'}->peerhost . "]:\n"
+				. $self->{'channels'}{$chan}{'topic'}, $buffer); 
 			@re = ("topicsend", $chan, $topic);
 		}
 		else {
@@ -1635,7 +1663,7 @@ Returns: "info", $from
 
 =head4 info request acknowledgment
 
-Returns: "info_ack", $from, $host, $user, $ip, $chans, $aa
+Returns: "info_ack", $from, $host, $user, $ip, $aa, @chans
 
 =cut
 
@@ -1647,13 +1675,13 @@ Returns: "info_ack", $from, $host, $user, $ip, $chans, $aa
 			# Remove #'s from end of string.
 			$chans =~ s/^#*(.+?)#*$/$1/;
 			my @chans = split(/#/, $chans);
-			$chans = undef;
-			foreach (@chans) { $chans .= "#$_,"; }
-			chop $chans;
+			my @channels;
+			$aa = '' unless $aa;
+			push @channels, '#'.$_ for @chans;
 			$self->debug("F: recognise, T: info_ack, From: $from, Host: $host, "
 				. "User: $user, Ip: $ip, Chans: $chans, AA: $aa"
 				, $buffer); 
-			@re = ("info_ack", $from, $host, $user, $ip, $chans, $aa);
+			@re = ("info_ack", $from, $host, $user, $ip, $aa, @channels);
 		}
 	} # }}}
 			
@@ -1775,16 +1803,14 @@ Returns: "here_ack", $from, $chan, $active
 
 =cut
 
-	elsif ($pkttype eq 'K') {
-		# {{{
+	elsif ($pkttype eq 'K') { # {{{
 		my ($to, $chan, $from, $active) = @args;
 		if ($to eq $self->{nick}) {
 			$self->debug("F: recognise, T:here_ack,From: $from, Chan $chan"
 				. ", status " .$self->num2status($active), $buffer);
 			@re = ("here_ack", $from, $chan, $active);
 		}
-		# }}}
-	}
+	} # }}}
 
 =head4 activity change
 
@@ -1793,8 +1819,7 @@ Returns: "active", $fromwho, $active
 =cut
 
 	# Active change
-	elsif ($pkttype eq 'M') {
-		# {{{
+	elsif ($pkttype eq 'M') { # {{{
 		my ($fromwho, $active) = @args;
 		#$buffer =~  /^\x58.{9}M(.+?)\0([01])/;
 		$self->{'users'}{$fromwho}{'active'} = $active;
@@ -1805,8 +1830,31 @@ Returns: "active", $fromwho, $active
 			$self->debug($fromwho." became inactive", $buffer); 
 		}
 		@re = ("active", $fromwho, $active);
-		# }}}
-	}
+	} # }}}
+	# Ping or pong
+	elsif ($pkttype eq 'P') { # {{{
+	    my ($temp, $from, $time) = @args;
+			my ($subtype, $to) = split //, $temp, 2;
+			if ($to eq $self->{nick} && $subtype eq '0') {
+				$self->pong($from, $time);
+				$self->debug("F: recognize, T: Ping/pong, Fr: $from, Time: $time");
+				@re = ('pong', $from, $time);
+			}
+	} # }}}
+
+=head4 flood blocking notification
+
+Returns: 'flood', $from, $seconds
+
+=cut
+
+	elsif ($pkttype eq 'Z') { # {{{
+		my ($to, $from, $sec) = @args;
+		if ($to eq $self->{nick}) {
+			@re = ($from, $sec);
+			$self->debug("F: recognize, T: flood, From: $from, Time: $sec");
+		}
+	} # }}}
 	else {
 		$self->debug("Received unknown buffer", $buffer) if $self->{debug} == 2;
 	}
