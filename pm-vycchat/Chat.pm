@@ -18,7 +18,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.71';
+our $VERSION = '0.72';
 
 # Prints debug messages
 sub debug { # {{{
@@ -194,10 +194,6 @@ sub here_ack { # {{{
 # Sends string thru unicast
 sub usend { # {{{
 	my ($self, $str, $to) = @_;
-	 {
-		$self->debug("F: usend_chan, Chan: $chan, Warn: bcast");
-		$self->{send}->send($str);
-	}
 
 	if ($self->{use_unicast} && defined $self->{users}{$to}{ip}) {
 		my $iaddr = inet_aton($self->{users}{$to}{ip});
