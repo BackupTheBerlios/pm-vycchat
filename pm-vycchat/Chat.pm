@@ -22,7 +22,13 @@ our $VERSION = '0.62';
 sub debug { # {{{
 	my ($self, $text, $buffer) = @_;
 	print "*** $text\n" if $self->{debug};
-	print "($buffer)\n" if $self->{'debug'} == 2;
+	if ($buffer && $self->{debug} == 2) {
+		my $header = substr $buffer, 0, 1;
+		my $random = substr $buffer, 1, 9;
+		my $left = substr $buffer, 10;
+		$left =~ s/\0/|/gs;
+		print "($header $random $left)\n";
+	}
 } # }}}
 
 # Generates Vypress Chat header used to mark its packets.

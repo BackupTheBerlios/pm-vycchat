@@ -19,7 +19,7 @@ my $vyc = Net::Vypress::Chat->new(
 	'send_info' => '0',
 	'localip' => '127.0.0.1',
 #	'localip' => '192.168.0.1',
-#	'debug' => 1
+	'debug' => 2
 );
 ok(defined $vyc, '$vyc is an object');
 ok($vyc->isa('Net::Vypress::Chat'), "and it's the right class");
