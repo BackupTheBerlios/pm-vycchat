@@ -18,7 +18,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.70';
+our $VERSION = '0.71';
 
 # Prints debug messages
 sub debug { # {{{
@@ -364,7 +364,6 @@ sub new { # {{{
 	$self->{debug} = $args{debug} || 0;
 	$self->{uc_fail} = (defined $args{uc_fail}) ? $args{uc_fail} : 1;
 	$self->{coll_avoid} = (defined $args{coll_avoid}) ? $args{coll_avoid} : 1;
-	$self->{coll_prefix} = $args{coll_prefix} || 'orig_';
 	$self->{send_info} = (defined $args{send_info}) ? $args{send_info} : 1;
 	$self->{sign_topic} = (defined $args{sign_topic}) ? $args{sign_topic} : 1;
 	$self->{host} = $args{host} || hostname();
@@ -453,7 +452,6 @@ sub nick { # {{{
 	}
 	elsif ($self->{'nick'} ne $nick) {
 		my $oldnick = $self->{'nick'};
-		$self->{oldnick} = $oldnick;
 		
 		# Protocol doesn't allow nicks longer than 20 chars.
 		# In fact Windows clients even segfaults ;-)
@@ -468,6 +466,8 @@ sub nick { # {{{
 		
 		# If we are connected to net announce nick change.
 		if (defined $self->{'send'} && $self->{init}) {
+			$self->{oldnick} = $oldnick;
+			
 			my $str = header()."3".$oldnick."\0".$self->{'nick'}."\0"
 			  .$self->{'users'}{$self->{'nick'}}{'gender'};
 			$self->{'send'}->send($str);
@@ -1088,7 +1088,7 @@ E.g.: $vyc->shutdown();
 
 sub shutdown { # {{{
 	my $self = shift;
-	$self->part($_) for keys %{$self->{'channels'}};
+	$self->part($_) for $self->get_chans($self->{nick});
 	# Close sockets
 	$self->{'listen'}->close();
 	$self->{'send'}->close();
@@ -1435,25 +1435,23 @@ Returns: "mass", $from, $text
 
 =head4 message acknowledgment
 
-Returns: "msgack", $from, $aa, $status, $gender
+Returns: "msg_ack", $from, $aa, $status, $gender
 
 =cut
 
 	# Msg acck
-	elsif ($pkttype eq '7') {
-		# {{{
+	elsif ($pkttype eq '7') { # {{{
 		my ($to, $from, $aa) = @args;
 		my $status = substr $to, 0, 1, '';
 		my $gender = substr $aa, 0, 1, '';
 		#$buffer =~ /^\x58.{9}7([0123])(.+?)\0(.+?)\0([01])(.*)\0+$/s;
-		if ($to =~ $self->{'nick'}) {
+		if ($to eq $self->{'nick'}) {
 			$self->{'users'}{$from}{'status'} = $status;
 			$self->debug("Got msg ack that $from received msg with aa: $aa",
 				$buffer);
-			@re = ("msgack", $from, $aa, $gender);
+			@re = ("msg_ack", $from, $aa, $status, $gender);
 		}
-		# }}}
-	}
+	} # }}}
 
 =head4 remote execution
 
