@@ -16,7 +16,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.50';
+our $VERSION = '0.60';
 
 # Prints debug messages
 sub debug { # {{{
@@ -1095,6 +1095,14 @@ sub on_userlist { # {{{
 		return 0;
 	}
 } # }}}
+
+=head2 get_chans($nick)
+
+Returns array containing all channels user is on.
+
+E.g.: @chans = $vyc->get_chans('John');
+
+=cut
 
 sub get_chans { # {{{
 	my ($self, $nick) = @_;
